@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-multipart
+
+ultralytics
+easyocr
+opencv-python-headless
+numpy
+
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+
+pytz

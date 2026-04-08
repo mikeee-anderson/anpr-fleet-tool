@@ -1,0 +1,12 @@
+.venv/
+../.venv/
+data/
+../data/
+runs/
+../runs/
+__pycache__/
+*.pyc
+.DS_Store
+token.json
+credentials.json
+client_secret*.json

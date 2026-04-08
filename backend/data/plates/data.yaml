@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../train/images
+test: ../train/images
+
+nc: 1
+names: ['Number-Plates']
+
+roboflow:
+  workspace: object-detection-d3iao
+  project: anpr-uig4h
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/object-detection-d3iao/anpr-uig4h/dataset/1
