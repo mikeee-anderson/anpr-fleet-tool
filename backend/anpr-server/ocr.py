@@ -3,6 +3,9 @@ from pathlib import Path
 from ultralytics import YOLO
 import easyocr
 import numpy as np
+import cv2
+
+MAX_OCR_WIDTH = 640  # px; plate crops wider than this are downscaled before OCR
 
 
 class ANPRPipeline:
@@ -54,6 +57,14 @@ class ANPRPipeline:
             crop = image_bgr[y1:y2, x1:x2]
             if crop.size == 0:
                 continue
+
+            # EasyOCR time grows steeply with crop size: a 1600 px plate from a
+            # phone photo took ~50 s on one vCPU vs 0.2 s at 640 px, with the
+            # same reads across the training photos
+            if crop.shape[1] > MAX_OCR_WIDTH:
+                scale = MAX_OCR_WIDTH / crop.shape[1]
+                crop = cv2.resize(crop, (MAX_OCR_WIDTH, max(1, int(crop.shape[0] * scale))),
+                                  interpolation=cv2.INTER_AREA)
 
             ocr_results = self.reader.readtext(crop)
 

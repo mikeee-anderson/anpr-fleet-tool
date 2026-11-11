@@ -20,9 +20,11 @@ class FakeYolo:
 class FakeReader:
     def __init__(self):
         self.calls = 0
+        self.crop_shapes = []
 
     def readtext(self, crop):
         self.calls += 1
+        self.crop_shapes.append(crop.shape[:2])
         return [(None, f"PLATE{self.calls}", 0.9)]
 
 
@@ -58,3 +60,12 @@ def test_no_boxes_means_no_ocr():
 
     assert pipeline.run(np.zeros((100, 100, 3), np.uint8)) == []
     assert pipeline.reader.calls == 0
+
+
+def test_wide_plate_crop_is_downscaled_before_ocr():
+    # A phone-photo-sized plate: 1600 x 1000 px
+    pipeline = make_pipeline([FakeBox(0.9, [0, 0, 1600, 1000])])
+
+    pipeline.run(np.zeros((1200, 2000, 3), np.uint8))
+
+    assert pipeline.reader.crop_shapes == [(400, 640)]
