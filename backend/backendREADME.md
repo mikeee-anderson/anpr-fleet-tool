@@ -2,7 +2,7 @@
  
 FastAPI server that receives plate images from the mobile app, runs YOLOv8 to detect the plate region, applies EasyOCR to extract the text, deduplicates, and logs to a Google Sheet tab named by today's date.
  
-Deployed on **Railway**.
+Runs locally with `docker compose up --build` (from the repo root) and deploys to **Google Cloud Run** with `deploy/cloud-run.sh`.
  
 ---
  
@@ -13,25 +13,17 @@ backend/
 ├── anpr-server/
 │   ├── app.py              # FastAPI app — endpoints, pipeline loading, error handling
 │   ├── ocr.py              # ANPRPipeline class (YOLOv8 + EasyOCR)
-│   ├── sheets.py           # Google Sheets auth, tab creation, plate logging, dedup
-│   └── models/
-│       └── detector/
-│           └── best.pt     # Fine-tuned YOLOv8 weights
-├── data/
-│   ├── annotated/          # Labelled training images
-│   ├── inference_images/   # Test inference images
-│   ├── plates/             # Cropped plate images
-│   ├── raw/                # Raw source images
-│   └── ocr_labels.csv      # OCR ground truth labels
-├── models/                 # Additional model artefacts
-├── notebooks/              # Training and experimentation notebooks
-├── runs/                   # YOLOv8 training run logs
-├── scripts/                # Utility and preprocessing scripts
-├── requirements.txt
-├── Dockerfile
-├── .dockerignore
-├── .env.example
-└── .railwayignore
+│   ├── sheets.py           # Google Sheets (or console) logging, credentials, dedup
+│   ├── models/detector/
+│   │   └── best.pt         # Fine-tuned YOLOv8 weights (the only committed weights)
+│   ├── tests/              # pytest suite (synthetic images only)
+│   ├── Dockerfile
+│   ├── requirements.txt    # pinned runtime deps (torch installed in the Dockerfile)
+│   ├── requirements-dev.txt
+│   └── .env.example
+├── data/plates/data.yaml   # YOLO dataset config (images are not committed)
+├── runs/detect/train/      # Training curves and metrics
+└── scripts/                # One-off inference script from development
 ```
  
 ---
@@ -39,24 +31,23 @@ backend/
 ## Setup
  
 ```bash
-# 1. Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate
+# Easiest: from the repo root
+docker compose up --build
  
-# 2. Install dependencies
-pip install -r requirements.txt
+# Or without Docker
+cd backend/anpr-server
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements-dev.txt
+uvicorn app:app --reload
  
-# 3. Configure environment
-cp .env.example .env
-# Set GOOGLE_SERVICE_ACCOUNT_JSON to your full service account JSON string
- 
-# 4. Run
-python anpr-server/app.py
+# Tests
+pytest
 ```
  
-Interactive API docs at `http://localhost:8000/docs`.
+Interactive API docs at `http://localhost:8000/docs`. No credentials are needed: without `SHEET_ID`, plates are printed to the console.
  
-> The model loads in a background thread on startup — check `/health` before sending images.
+> The model loads in a background thread on startup — check `/health` before sending images. (On Cloud Run it loads before the server accepts traffic instead.)
  
 ---
  
@@ -79,7 +70,8 @@ From all detections, picks the one with the highest OCR confidence (then YOLO co
 - OCR confidence: `>0.45`
  
 ### Logging (`sheets.py`)
-- Authenticates via Google service account JSON stored in `GOOGLE_SERVICE_ACCOUNT_JSON` env var
+- If `SHEET_ID` is unset, rows are printed to the console instead (no credentials needed)
+- Credentials: `GOOGLE_SERVICE_ACCOUNT_JSON` if set, otherwise Application Default Credentials (a key file via `GOOGLE_APPLICATION_CREDENTIALS`, or the Cloud Run service account)
 - Creates a new Sheet tab named `YYYY-MM-DD` if it doesn't exist for today (NZ timezone)
 - Appends a row: `[timestamp, plate_text, yolo_conf, ocr_conf, source]`
 - Deduplicates: ignores the same plate logged within 15 seconds (in-memory)
@@ -95,7 +87,8 @@ Returns server and pipeline status.
 {
   "ok": true,
   "pipeline_ready": true,
-  "pipeline_error": null
+  "pipeline_error": null,
+  "logger": "console"
 }
 ```
  
@@ -156,24 +149,27 @@ Combined endpoint — detect and log in a single call. Used by the mobile app's 
  
 ## Environment Variables
  
+All optional — see `anpr-server/.env.example`.
+ 
 | Variable | Description |
 |----------|-------------|
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Full service account JSON as a string |
+| `SHEET_ID` | Google Sheet to log to. Unset → console logging |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Full service account JSON as one string |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to a key file (alternative to the above) |
+| `PORT` | Listen port (default 8000; Cloud Run sets 8080) |
  
-```env
-GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"...","private_key":"..."}
-```
- 
-> Never store the service account as a file in production — pass the full JSON as an env var as shown above.
+On Cloud Run, leave the credential variables empty: the service runs as its own service account, which you share the Sheet with.
  
 ---
  
 ## Docker
  
 ```bash
-docker build -t anpr-server .
-docker run -p 8000:8000 --env-file .env anpr-server
+# from the repo root
+docker compose up --build
 ```
+ 
+The image bakes in the EasyOCR weights so containers don't download them on startup.
  
 ---
  
