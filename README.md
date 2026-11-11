@@ -4,6 +4,8 @@
 
 A React Native app sends the photo to a FastAPI backend. The backend finds the plate with a custom-trained YOLOv8 detector, reads it with EasyOCR, and appends it to a Google Sheet tab for the day.
 
+**Live demo API:** <https://anpr-backend-452959198599.us-central1.run.app/docs>. Upload a car photo to `POST /anpr/detect` from the docs page. It runs in demo mode, so logs go to the server console, not a Sheet. The first request after the service has been idle takes a few extra seconds while it cold-starts.
+
 ---
 
 ## Problem and outcome
@@ -109,7 +111,7 @@ echo "EXPO_PUBLIC_API_URL=https://your-service.run.app" > mobile/.env
 PROJECT_ID=your-project ./deploy/cloud-run.sh
 ```
 
-Cloud Build builds the image, so no local Docker is needed. The service scales to zero and is capped at one instance, so it stays within the free allowance. The first request after it has been idle takes about 30 s to cold-start, and the app retries while the server warms up.
+Cloud Build builds the image, so no local Docker is needed. The script also gives the project's build service account the Cloud Run Builder role, which newer projects don't grant by default. The service scales to zero and is capped at one instance, so it stays within the free allowance. A warm scan takes about 3 s from New Zealand to `us-central1`, most of it CPU inference. The first request after the service has been idle also waits for the container to start and the model to load, and the app retries while the server warms up.
 
 Add `SHEET_ID=...` to log to a Sheet. The service then runs as its own service account: you share the Sheet with that account's email, and no key file exists anywhere. The image (~1 GB) is larger than Artifact Registry's 0.5 GB free storage, so after Google's trial credit ends expect a few cents a month.
 
