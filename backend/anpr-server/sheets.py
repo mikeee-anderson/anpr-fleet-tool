@@ -8,6 +8,7 @@ import json
 import os
 
 import pytz
+import google.auth
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
@@ -30,29 +31,36 @@ def recently_logged(plate_text: str, within_seconds: int = 15) -> bool:
 # CONFIG
 # =========================
 SPREADSHEET_ID = os.environ.get("SHEET_ID")
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 NZ_TZ = pytz.timezone("Pacific/Auckland")
 
 
+def sheets_enabled() -> bool:
+    """No SHEET_ID -> console mode: plates are printed instead of logged."""
+    return bool(SPREADSHEET_ID)
+
+
 # =========================
-# AUTH (SERVICE ACCOUNT)
+# AUTH
 # =========================
-def _get_service():
+def _get_credentials():
     """
-    Reads service account JSON from env var GOOGLE_SERVICE_ACCOUNT_JSON.
-    (Railway Variables -> paste the whole JSON)
+    1) GOOGLE_SERVICE_ACCOUNT_JSON: the whole key JSON in one env var
+    2) otherwise Application Default Credentials: a key file named by
+       GOOGLE_APPLICATION_CREDENTIALS, or on Cloud Run the service's own
+       identity (no key needed at all)
     """
     raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-    if not raw:
-        raise RuntimeError("Missing GOOGLE_SERVICE_ACCOUNT_JSON env var")
+    if raw:
+        return Credentials.from_service_account_info(json.loads(raw), scopes=SCOPES)
 
-    info = json.loads(raw)
-    creds = Credentials.from_service_account_info(
-        info,
-        scopes=["https://www.googleapis.com/auth/spreadsheets"],
-    )
+    creds, _project = google.auth.default(scopes=SCOPES)
+    return creds
 
-    return build("sheets", "v4", credentials=creds)
+
+def _get_service():
+    return build("sheets", "v4", credentials=_get_credentials(), cache_discovery=False)
 
 
 # =========================
@@ -98,10 +106,7 @@ def log_plate(plate_text: str, meta: dict | None = None) -> dict:
     """
     meta = meta or {}
 
-    service = _get_service()
     tab = _today_tab_name()
-    _ensure_sheet_exists(service, tab)
-
     timestamp = datetime.now(NZ_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
     row = [
@@ -111,6 +116,13 @@ def log_plate(plate_text: str, meta: dict | None = None) -> dict:
         float(meta.get("ocr_conf", 0.0)),
         str(meta.get("source", "unknown")),
     ]
+
+    if not sheets_enabled():
+        print(f"[console log] {tab}: {row}", flush=True)
+        return {"sheet": "console", "timestamp": timestamp}
+
+    service = _get_service()
+    _ensure_sheet_exists(service, tab)
 
     service.spreadsheets().values().append(
         spreadsheetId=SPREADSHEET_ID,

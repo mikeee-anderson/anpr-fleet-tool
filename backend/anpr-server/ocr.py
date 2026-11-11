@@ -67,15 +67,10 @@ class ANPRPipeline:
 
 def load_pipeline():
 
-    SERVER_DIR = Path(__file__).resolve().parent          # /app in Railway
+    SERVER_DIR = Path(__file__).resolve().parent          # /app in the container
     MODEL_PATH = SERVER_DIR / "models" / "detector" / "best.pt"
 
     if not MODEL_PATH.exists():
         raise FileNotFoundError(f"Missing model: {MODEL_PATH} (cwd={Path.cwd()})")
 
-    # TEMPORARY ================================
-    print("SERVER_DIR:", SERVER_DIR)
-    print("MODEL_PATH:", MODEL_PATH)
-    print("MODEL_EXISTS:", MODEL_PATH.exists())
-    # ===================================
     return ANPRPipeline(model_path=MODEL_PATH)

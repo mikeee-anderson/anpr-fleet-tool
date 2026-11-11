@@ -7,9 +7,9 @@ import cv2
 from threading import Thread
 
 from ocr import load_pipeline
-from sheets import log_plate, recently_logged
+from sheets import log_plate, recently_logged, sheets_enabled
 
-from google.auth.exceptions import RefreshError
+from google.auth.exceptions import DefaultCredentialsError, RefreshError
 from googleapiclient.errors import HttpError
 
 app = FastAPI(title="ANPR Server")
@@ -44,6 +44,7 @@ def health():
         "ok": True,
         "pipeline_ready": pipeline_ready,
         "pipeline_error": pipeline_error,
+        "logger": "google_sheets" if sheets_enabled() else "console",
     }
 
 # -------- error handling so you don't get "mystery 500s" ----------
@@ -141,7 +142,7 @@ async def anpr_log(payload: dict):
 
     try:
         row_info = log_plate(plate_text, meta=payload)
-    except RefreshError as e:
+    except (RefreshError, DefaultCredentialsError) as e:
         return {
             "status": "sheet_auth_error",
             "message": "Detected plate but Google Sheets auth failed.",

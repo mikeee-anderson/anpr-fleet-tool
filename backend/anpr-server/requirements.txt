@@ -1,15 +1,16 @@
-fastapi
-uvicorn[standard]
-python-multipart
+# Pinned to the versions last verified together (Nov 2026).
+# torch / torchvision are installed separately in the Dockerfile (CPU wheels).
+fastapi==0.162.4
+uvicorn[standard]==0.54.0
+python-multipart==0.0.33
 
-ultralytics
-easyocr
-opencv-python-headless
-numpy
+ultralytics==8.4.210
+easyocr==1.7.2
+opencv-python-headless==5.0.0.93
+numpy==2.4.6
 
-google-api-python-client
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
+google-api-python-client==2.202.0
+google-auth==2.62.2
+google-auth-httplib2==0.4.4
 
-pytz
+pytz==2026.6
