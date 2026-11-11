@@ -20,6 +20,13 @@ echo "Enabling APIs..."
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
   artifactregistry.googleapis.com sheets.googleapis.com
 
+# On newer projects the default build service account starts without
+# permissions; source deploys need it to hold the Cloud Run Builder role.
+PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format 'value(projectNumber)')"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member "serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role roles/run.builder --condition None >/dev/null
+
 ENV_VARS="SHEET_ID=${SHEET_ID}"
 SA_FLAG=()
 if [[ -n "$SHEET_ID" ]]; then
