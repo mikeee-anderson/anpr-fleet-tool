@@ -1,0 +1,14 @@
+# Files never uploaded by `gcloud run deploy --source` (keeps keys off Google Cloud)
+.gcloudignore
+.venv
+__pycache__
+*.pyc
+.DS_Store
+.env
+.env.*
+service-account*.json
+token.json
+credentials.json
+client_secret*.json
+tests
+.pytest_cache

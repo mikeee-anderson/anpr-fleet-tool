@@ -3,6 +3,7 @@ from fastapi import FastAPI, UploadFile, File, Request
 from fastapi.responses import JSONResponse
 import numpy as np
 import cv2
+import os
 
 from threading import Thread
 
@@ -29,6 +30,12 @@ def _load_pipeline_bg():
 
 @app.on_event("startup")
 def startup_event():
+    if os.environ.get("K_SERVICE"):
+        # Cloud Run only gives the container CPU while it serves requests, so
+        # a background thread would stall. Load before accepting traffic; the
+        # startup probe holds requests until the model is ready.
+        _load_pipeline_bg()
+        return
     # Start server immediately; load ML models in background
     Thread(target=_load_pipeline_bg, daemon=True).start()
 
