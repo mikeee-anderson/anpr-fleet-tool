@@ -29,7 +29,7 @@ def recently_logged(plate_text: str, within_seconds: int = 15) -> bool:
 # =========================
 # CONFIG
 # =========================
-SPREADSHEET_ID = "REDACTED_SHEET_ID"
+SPREADSHEET_ID = os.environ.get("SHEET_ID")
 
 NZ_TZ = pytz.timezone("Pacific/Auckland")
 

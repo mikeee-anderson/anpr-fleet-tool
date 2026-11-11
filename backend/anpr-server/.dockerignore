@@ -7,3 +7,8 @@ runs
 token.json
 credentials.json
 client_secret*.json
+.env
+.env.*
+service-account*.json
+tests
+.pytest_cache

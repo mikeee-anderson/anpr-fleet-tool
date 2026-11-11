@@ -1,1 +1,35 @@
-service-account.json
+# ---------- Secrets & local config ----------
+.env
+.env.*
+!.env.example
+service-account*.json
+credentials.json
+token.json
+client_secret*.json
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# ---------- Real-world data (never commit plate photos) ----------
+backend/data/raw/
+backend/data/annotated/
+backend/data/inference_images/
+backend/data/plates/train/
+backend/data/plates/valid/
+backend/data/plates/test/
+backend/data/plates/README.*.txt
+backend/runs/detect/predict/
+backend/runs/detect/train/*_batch*.jpg
+
+# ---------- Model weights ----------
+# Only the served detector is committed; everything else is reproducible.
+*.pt
+!backend/anpr-server/models/detector/best.pt
+
+# ---------- Editors / OS ----------
+.DS_Store
+.idea/
