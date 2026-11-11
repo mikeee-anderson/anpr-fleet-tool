@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 
-const BACKEND_URL = "https://anpr-production-c38d.up.railway.app";
+import { BACKEND_URL } from "@/constants/config";
 
 type BestDetection = {
     bbox: number[];
