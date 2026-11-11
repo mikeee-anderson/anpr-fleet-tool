@@ -129,7 +129,14 @@ export default function HomeScreen() {
             }
 
             if (data?.status === "needs_rescan") {
-                Alert.alert("Rescan needed", data?.message || "Could not confidently read plate.");
+                // Show what the model did see, so a near miss is explainable
+                const top: BestDetection | undefined = data?.detections?.[0];
+                const seen = top
+                    ? `\n\nClosest read: ${top.ocr?.text ?? "(no text)"}\n` +
+                      `Detector ${Math.round(top.yolo_conf * 100)}% · ` +
+                      `OCR ${top.ocr ? Math.round(top.ocr.ocr_conf * 100) + "%" : "–"}`
+                    : "\n\nNo plate found in the photo.";
+                Alert.alert("Rescan needed", (data?.message || "Could not confidently read plate.") + seen);
                 return;
             }
 
