@@ -122,7 +122,7 @@ Add `SHEET_ID=...` to log to a Sheet. The service then runs as its own service a
 - **Data:** 26 phone photos of fleet vehicles. I annotated the plates in Roboflow (one class, `Number-Plates`) and used its augmentation to export 78 images. The photos show real plates, so they are **not** in this repo.
 - **Training:** fine-tuned pretrained `yolov8n.pt` for 50 epochs at 640 px, batch 8, on CPU (Ultralytics defaults otherwise). The training curves and confusion matrix are in [`backend/runs/detect/train/`](backend/runs/detect/train/).
 - **OCR:** EasyOCR's off-the-shelf English recogniser runs on each detected crop. Spaces and hyphens are stripped and the text is uppercased.
-- **Honest caveat:** the dataset config pointed validation at the training images, so the reported mAP50 of 0.995 is *training* accuracy, not a held-out score. In spot checks, the detector's confidence was high (~0.9). The weaker step is OCR, which can confuse similar characters (e.g. reading `Q` as `@`).
+- **Honest caveat:** the dataset config pointed validation at the training images, so the reported mAP50 of 0.995 is *training* accuracy, not a held-out score. In spot checks, the detector's confidence was high (~0.9). The weaker step is OCR. With plates read off the 26 source photos and the photo filenames as ground truth, EasyOCR's top reading was an exact match **7 times out of 26**. The usual errors are character confusions such as reading `Q` as `@`. In the app, the user confirms each reading before it is logged.
 
 ---
 
