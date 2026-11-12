@@ -120,7 +120,10 @@ Add `SHEET_ID=...` to log to a Sheet. The service then runs as its own service a
 - **Data:** 26 phone photos of fleet vehicles. I annotated the plates in Roboflow (one class, `Number-Plates`) and used its augmentation to export 78 images. The photos show real plates, so they are **not** in this repo.
 - **Training:** fine-tuned pretrained `yolov8n.pt` for 50 epochs at 640 px, batch 8, on CPU (Ultralytics defaults otherwise). The training curves and confusion matrix are in [`backend/runs/detect/train/`](backend/runs/detect/train/).
 - **OCR:** EasyOCR's off-the-shelf English recogniser runs on each detected crop. Spaces and hyphens are stripped and the text is uppercased.
-- **Honest caveat:** the dataset config pointed validation at the training images, so the reported mAP50 of 0.995 is *training* accuracy, not a held-out score. In spot checks, the detector's confidence was high (~0.9). The weaker step is OCR. With plates read off the 26 source photos and the photo filenames as ground truth, EasyOCR's top reading was an exact match **7 times out of 26**. The usual errors are character confusions such as reading `Q` as `@`. In the app, the user confirms each reading before it is logged.
+- **Honest caveat:** the dataset config pointed validation at the training images, so the reported mAP50 of 0.995 is *training* accuracy, not a held-out score. In spot checks, the detector's confidence was high (~0.9). The weaker step is OCR. I measured it on the 26 source photos, using the photo filenames as ground truth:
+  - Plain EasyOCR got an exact match **7 times out of 26**. It confused characters (e.g. `Q` read as `@`) and could not read tilted plates at all.
+  - Restricting OCR to the characters A–Z and 0–9, and straightening tilted plates before reading them, raised that to **17 out of 26**. To straighten a plate, the app finds the plate's bright rectangle in the crop, measures its tilt, and rotates the crop level. Steep tilts are read at the estimate and ±5°, and the most confident reading is kept.
+  - In the app, the user confirms each reading before it is logged.
 
 ---
 
@@ -135,7 +138,7 @@ Add `SHEET_ID=...` to log to a Sheet. The service then runs as its own service a
 
 ## What I'd do next
 
-1. Collect more varied data (weather, angles, night), add a proper train/val/test split, and report real held-out metrics.
+1. Collect more varied data (weather, angles, night), add a proper train/val/test split, and report real held-out metrics. Also retrain with rotation and perspective augmentation: training had them off (`degrees: 0`), so the detector is least confident on angled plates.
 2. Validate and correct OCR output against NZ plate formats.
 3. Export YOLO to ONNX and use a lighter OCR to shrink the image, cutting memory and cold starts and fitting smaller free tiers.
 4. Add an API key on logging endpoints, proper HTTP status codes, and a real datastore with history and search.
