@@ -30,15 +30,17 @@ class FakeYolo:
 
 
 class FakeReader:
-    def __init__(self):
+    def __init__(self, confidences=(0.9,)):
         self.calls = 0
         self.crop_shapes = []
+        self.confidences = confidences  # per call; the last value repeats
 
     def readtext(self, crop, **kwargs):
         self.calls += 1
         self.crop_shapes.append(crop.shape[:2])
         self.kwargs = kwargs
-        return [(None, f"PLATE{self.calls}", 0.9)]
+        conf = self.confidences[min(self.calls, len(self.confidences)) - 1]
+        return [(None, f"PLATE{self.calls}", conf)]
 
 
 def make_pipeline(boxes, max_plates=3, conf_threshold=0.35):
@@ -112,12 +114,27 @@ def test_level_plate_is_not_rotated():
     assert plate_tilt(tilted_plate_crop(0)) is None
 
 
-def test_steeply_tilted_plate_is_read_at_three_angles():
+def steep_plate_pipeline(confidences):
     canvas = np.zeros((900, 900, 3), np.uint8)
     crop = tilted_plate_crop(60)
     canvas[: crop.shape[0], : crop.shape[1]] = crop
     pipeline = make_pipeline([FakeBox(0.9, [0, 0, crop.shape[1], crop.shape[0]])])
+    pipeline.reader = FakeReader(confidences)
+    return pipeline, canvas
+
+
+def test_steep_tilt_stops_after_a_confident_read():
+    pipeline, canvas = steep_plate_pipeline([0.95])
 
     pipeline.run(canvas)
 
+    assert pipeline.reader.calls == 1
+
+
+def test_steep_tilt_tries_three_angles_and_keeps_the_most_confident():
+    pipeline, canvas = steep_plate_pipeline([0.40, 0.80, 0.60])
+
+    detections = pipeline.run(canvas)
+
     assert pipeline.reader.calls == 3
+    assert detections[0]["ocr"] == {"text": "PLATE2", "ocr_conf": 0.80}

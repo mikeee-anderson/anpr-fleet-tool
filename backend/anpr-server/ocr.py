@@ -10,6 +10,7 @@ PLATE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 MIN_DESKEW_DEGREES = 3  # smaller tilts read fine as they are
 STEEP_TILT_DEGREES = 15  # from here on, read at three angles around the estimate
 DESKEW_SPREAD = 5  # degrees either side of the estimate tried for steep tilts
+CONFIDENT_READ = 0.9  # OCR confidence that ends the search over angles early
 
 
 class ANPRPipeline:
@@ -64,8 +65,9 @@ class ANPRPipeline:
 
             # OCR reads level text; a tilted plate reads as noise, so straighten
             # it first. The tilt estimate can be a few degrees off and EasyOCR is
-            # sensitive to that, so strongly tilted plates are read at the
-            # estimate and +/- DESKEW_SPREAD, keeping the most confident read.
+            # sensitive to that, so strongly tilted plates are also read at
+            # +/- DESKEW_SPREAD, keeping the most confident read. Each read
+            # costs seconds on CPU, so stop as soon as one is confident.
             tilt = plate_tilt(crop)
             if tilt is None:
                 angles = []
@@ -73,9 +75,16 @@ class ANPRPipeline:
                 angles = [tilt]
             else:
                 angles = [tilt, tilt - DESKEW_SPREAD, tilt + DESKEW_SPREAD]
-            reads = [self._read(rotate_level(crop, a)) for a in angles]
-            reads = [r for r in reads if r] or [self._read(crop)]
-            best = max(reads, key=lambda r: r["ocr_conf"] if r else -1)
+
+            best = None
+            for angle in angles:
+                read = self._read(rotate_level(crop, angle))
+                if read and (best is None or read["ocr_conf"] > best["ocr_conf"]):
+                    best = read
+                if best and best["ocr_conf"] >= CONFIDENT_READ:
+                    break
+            if best is None:
+                best = self._read(crop)
 
             detections.append({
                 "bbox": [x1, y1, x2, y2],
