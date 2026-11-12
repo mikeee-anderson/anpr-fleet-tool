@@ -6,6 +6,11 @@ import numpy as np
 import cv2
 
 MAX_OCR_WIDTH = 640  # px; plate crops wider than this are downscaled before OCR
+PLATE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+MIN_DESKEW_DEGREES = 3  # smaller tilts read fine as they are
+STEEP_TILT_DEGREES = 15  # from here on, read at three angles around the estimate
+DESKEW_SPREAD = 5  # degrees either side of the estimate tried for steep tilts
+CONFIDENT_READ = 0.9  # OCR confidence that ends the search over angles early
 
 
 class ANPRPipeline:
@@ -58,25 +63,28 @@ class ANPRPipeline:
             if crop.size == 0:
                 continue
 
-            # EasyOCR time grows steeply with crop size: a 1600 px plate from a
-            # phone photo took ~50 s on one vCPU vs 0.2 s at 640 px, with the
-            # same reads across the training photos
-            if crop.shape[1] > MAX_OCR_WIDTH:
-                scale = MAX_OCR_WIDTH / crop.shape[1]
-                crop = cv2.resize(crop, (MAX_OCR_WIDTH, max(1, int(crop.shape[0] * scale))),
-                                  interpolation=cv2.INTER_AREA)
-
-            ocr_results = self.reader.readtext(crop)
+            # OCR reads level text; a tilted plate reads as noise, so straighten
+            # it first. The tilt estimate can be a few degrees off and EasyOCR is
+            # sensitive to that, so strongly tilted plates are also read at
+            # +/- DESKEW_SPREAD, keeping the most confident read. Each read
+            # costs seconds on CPU, so stop as soon as one is confident.
+            tilt = plate_tilt(crop)
+            if tilt is None:
+                angles = []
+            elif abs(tilt) < STEEP_TILT_DEGREES:
+                angles = [tilt]
+            else:
+                angles = [tilt, tilt - DESKEW_SPREAD, tilt + DESKEW_SPREAD]
 
             best = None
-            for (_bbox, text, ocr_conf) in ocr_results:
-                if ocr_conf < self.ocr_min_conf:
-                    continue
-                cleaned = self._clean_text(text)
-                if not cleaned:
-                    continue
-                if best is None or ocr_conf > best["ocr_conf"]:
-                    best = {"text": cleaned, "ocr_conf": float(ocr_conf)}
+            for angle in angles:
+                read = self._read(rotate_level(crop, angle))
+                if read and (best is None or read["ocr_conf"] > best["ocr_conf"]):
+                    best = read
+                if best and best["ocr_conf"] >= CONFIDENT_READ:
+                    break
+            if best is None:
+                best = self._read(crop)
 
             detections.append({
                 "bbox": [x1, y1, x2, y2],
@@ -85,6 +93,80 @@ class ANPRPipeline:
             })
 
         return detections
+
+    def _read(self, crop):
+        """Best OCR reading of a plate crop, or None."""
+        # EasyOCR time grows steeply with crop size: a 1600 px plate from a
+        # phone photo took ~50 s on one vCPU vs 0.2 s at 640 px, with the
+        # same reads across the training photos
+        if crop.shape[1] > MAX_OCR_WIDTH:
+            scale = MAX_OCR_WIDTH / crop.shape[1]
+            crop = cv2.resize(crop, (MAX_OCR_WIDTH, max(1, int(crop.shape[0] * scale))),
+                              interpolation=cv2.INTER_AREA)
+
+        # NZ plates are A-Z and 0-9 only; this stops reads like "@" for "Q"
+        ocr_results = self.reader.readtext(crop, allowlist=PLATE_CHARS)
+
+        best = None
+        for (_bbox, text, ocr_conf) in ocr_results:
+            if ocr_conf < self.ocr_min_conf:
+                continue
+            cleaned = self._clean_text(text)
+            if not cleaned:
+                continue
+            if best is None or ocr_conf > best["ocr_conf"]:
+                best = {"text": cleaned, "ocr_conf": float(ocr_conf)}
+        return best
+
+
+def plate_tilt(crop):
+    """
+    Tilt of the plate in a crop, in degrees within [-90, 90), or None.
+
+    The plate is the largest bright rectangle in the crop: threshold it and
+    take the largest contour's minimum-area rectangle. Returns None when no
+    plate-shaped rectangle is found or the tilt is already small.
+    """
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(cv2.GaussianBlur(gray, (5, 5), 0), 0, 255,
+                            cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+
+    contour = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(contour) < 0.2 * crop.shape[0] * crop.shape[1]:
+        return None
+
+    rect = cv2.minAreaRect(contour)
+    _, (rw, rh), _ = rect
+    long_side, short_side = max(rw, rh), min(rw, rh)
+    if short_side < 1 or not 1.5 <= long_side / short_side <= 7:
+        return None  # not plate-shaped
+
+    # Tilt of the rectangle's long edge, from its corners: minAreaRect's own
+    # angle convention differs between OpenCV versions
+    p = cv2.boxPoints(rect)
+    edge = p[1] - p[0] if np.linalg.norm(p[1] - p[0]) >= np.linalg.norm(p[2] - p[1]) else p[2] - p[1]
+    tilt = float(np.degrees(np.arctan2(edge[1], edge[0])))
+    tilt = (tilt + 90) % 180 - 90  # a plate's direction, not its heading
+    return tilt if abs(tilt) >= MIN_DESKEW_DEGREES else None
+
+
+def rotate_level(crop, tilt):
+    """
+    Rotate the whole crop by +tilt (y points down, so this undoes the tilt)
+    onto a canvas big enough to keep every corner. Cropping tight to the plate
+    rectangle clipped the characters and hurt OCR.
+    """
+    h, w = crop.shape[:2]
+    matrix = cv2.getRotationMatrix2D((w / 2, h / 2), tilt, 1.0)
+    cos, sin = abs(matrix[0, 0]), abs(matrix[0, 1])
+    new_w, new_h = int(h * sin + w * cos), int(h * cos + w * sin)
+    matrix[0, 2] += new_w / 2 - w / 2
+    matrix[1, 2] += new_h / 2 - h / 2
+    return cv2.warpAffine(crop, matrix, (new_w, new_h), flags=cv2.INTER_LINEAR,
+                          borderValue=(255, 255, 255))
 
 
 def load_pipeline():
