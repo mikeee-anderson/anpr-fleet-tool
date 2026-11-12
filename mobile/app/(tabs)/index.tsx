@@ -10,6 +10,7 @@ import {
     Pressable,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { File } from "expo-file-system";
 
 import { BACKEND_URL } from "@/constants/config";
 
@@ -110,17 +111,16 @@ export default function HomeScreen() {
         setLoadingDetect(true);
 
         try {
+            // SDK 58's fetch only accepts Blob-like parts, not { uri, name, type };
+            // expo-file-system's File reads the photo and supplies its name and type
             const formData = new FormData();
-            formData.append("file", {
-                uri: asset.uri,
-                name: "plate.jpg",
-                type: "image/jpeg",
-            } as any);
+            formData.append("file", new File(asset.uri));
 
             const { ok, data } = await fetchJsonWithRetry(
                 `${BACKEND_URL}/anpr/detect`,
                 { method: "POST", body: formData },
-                { retries: 3, backoffMs: 1200, timeoutMs: 25000 }
+                // CPU inference plus a possible cold start can exceed 25 s; a timeout re-uploads the photo
+                { retries: 3, backoffMs: 1200, timeoutMs: 45000 }
             );
 
             if (!ok) {
@@ -129,7 +129,14 @@ export default function HomeScreen() {
             }
 
             if (data?.status === "needs_rescan") {
-                Alert.alert("Rescan needed", data?.message || "Could not confidently read plate.");
+                // Show what the model did see, so a near miss is explainable
+                const top: BestDetection | undefined = data?.detections?.[0];
+                const seen = top
+                    ? `\n\nClosest read: ${top.ocr?.text ?? "(no text)"}\n` +
+                      `Detector ${Math.round(top.yolo_conf * 100)}% · ` +
+                      `OCR ${top.ocr ? Math.round(top.ocr.ocr_conf * 100) + "%" : "–"}`
+                    : "\n\nNo plate found in the photo.";
+                Alert.alert("Rescan needed", (data?.message || "Could not confidently read plate.") + seen);
                 return;
             }
 

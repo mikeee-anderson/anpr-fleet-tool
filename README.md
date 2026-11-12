@@ -99,7 +99,7 @@ npm install
 npx expo start
 ```
 
-Scan the QR code with **Expo Go**. With no configuration, the app calls the backend on the same machine Expo is running on, port 8000, so a phone on the same Wi-Fi works with `docker compose up`. To use a deployed backend:
+Scan the QR code with **Expo Go** (SDK 58). Expo Go now requires an Expo account, so sign in on your phone and run `npx expo login` on your computer, which opens a browser and also works for accounts created with GitHub. With no configuration, the app calls the backend on the same machine Expo is running on, port 8000, so a phone on the same Wi-Fi works with `docker compose up`. To use a deployed backend:
 
 ```bash
 echo "EXPO_PUBLIC_API_URL=https://your-service.run.app" > mobile/.env
