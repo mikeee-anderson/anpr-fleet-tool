@@ -111,3 +111,16 @@ def test_real_pipeline_runs_end_to_end_on_synthetic_image(plate_jpeg):
     assert isinstance(detections, list)
     for d in detections:
         assert set(d) == {"bbox", "yolo_conf", "ocr"}
+
+
+@pytest.mark.parametrize("bad", ["ABC-123", "<script>", "ABC 123", "ÄBC123", "ABCDEFGHI", "🚗"])
+def test_log_rejects_non_alphanumeric_plate_text(client, bad):
+    res = client.post("/anpr/log", json={"plate_text": bad})
+
+    assert res.json()["status"] == "error"
+
+
+def test_log_uppercases_valid_plate_text(client):
+    res = client.post("/anpr/log", json={"plate_text": "abc123"})
+
+    assert res.json()["logged_plate"] == "ABC123"

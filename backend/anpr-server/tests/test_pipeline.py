@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import pytest
 
-from ocr import PLATE_CHARS, ANPRPipeline, pick_plate_text, plate_tilt, rotate_level
+from ocr import PLATE_CHARS, ANPRPipeline, correct_plate_format, pick_plate_text, plate_tilt, rotate_level
 
 
 def box(x, y, w, h):
@@ -183,3 +183,29 @@ def test_over_long_join_falls_back_to_tallest_piece():
 
 def test_low_confidence_pieces_are_ignored():
     assert pick_plate_text([(box(0, 0, 100, 60), "ABC123", 0.1)], 0.3, clean) is None
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("ABCI23", "ABC123"),  # 1 read as I
+    ("ABC1O3", "ABC103"),  # 0 read as O
+    ("A8C123", "A8C123"),  # B/8 is not in the safe map: unchanged
+    ("0BC123", "OBC123"),  # O read as 0 in a letter position
+    ("ABCDEF", "ABCDEF"),  # personalised: unchanged
+    ("BOSS12", "BOSS12"),  # personalised: would need two changes, unchanged
+    ("ABC123", "ABC123"),  # already standard
+    ("AB12I4", "AB1214"),  # older AB1234 format
+])
+def test_plate_format_correction(raw, expected):
+    assert correct_plate_format(raw) == expected
+
+
+def test_corrected_read_keeps_raw_text():
+    read = pick_plate_text([(box(0, 0, 200, 60), "ABCI23", 0.7)], 0.3, clean)
+
+    assert read["text"] == "ABC123"
+    assert read["raw_text"] == "ABCI23"
+    assert read["ocr_conf"] == pytest.approx(0.7)
+
+
+def test_clean_text_keeps_only_letters_and_digits():
+    assert ANPRPipeline._clean_text(" ab-c.1_2'3! ") == "ABC123"
