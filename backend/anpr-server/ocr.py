@@ -11,6 +11,8 @@ MIN_DESKEW_DEGREES = 3  # smaller tilts read fine as they are
 STEEP_TILT_DEGREES = 15  # from here on, read at three angles around the estimate
 DESKEW_SPREAD = 5  # degrees either side of the estimate tried for steep tilts
 CONFIDENT_READ = 0.9  # OCR confidence that ends the search over angles early
+MAIN_LINE_RATIO = 0.6  # text this fraction of the tallest text's height counts as plate text
+MAX_PLATE_CHARS = 8  # longest plausible NZ plate reading
 
 
 class ANPRPipeline:
@@ -107,16 +109,51 @@ class ANPRPipeline:
         # NZ plates are A-Z and 0-9 only; this stops reads like "@" for "Q"
         ocr_results = self.reader.readtext(crop, allowlist=PLATE_CHARS)
 
-        best = None
-        for (_bbox, text, ocr_conf) in ocr_results:
-            if ocr_conf < self.ocr_min_conf:
-                continue
-            cleaned = self._clean_text(text)
-            if not cleaned:
-                continue
-            if best is None or ocr_conf > best["ocr_conf"]:
-                best = {"text": cleaned, "ocr_conf": float(ocr_conf)}
-        return best
+        return pick_plate_text(ocr_results, self.ocr_min_conf, self._clean_text)
+
+
+def pick_plate_text(ocr_results, min_conf, clean):
+    """
+    The plate number from EasyOCR's text pieces, or None.
+
+    YOLO's box usually includes the plate surround (dealer names, slogans),
+    and that small text can out-score the plate on confidence. The plate's
+    characters are the tallest text in the crop, so keep the tallest line:
+    pieces at least MAIN_LINE_RATIO as tall as the tallest one and level with
+    it, joined left to right (EasyOCR sometimes splits "ABC" and "123").
+    """
+    pieces = []
+    for (box, text, conf) in ocr_results:
+        cleaned = clean(text)
+        if conf < min_conf or not cleaned:
+            continue
+        ys = [p[1] for p in box]
+        pieces.append({
+            "text": cleaned,
+            "conf": float(conf),
+            "height": max(ys) - min(ys),
+            "mid_y": (max(ys) + min(ys)) / 2,
+            "left": min(p[0] for p in box),
+        })
+    if not pieces:
+        return None
+
+    tallest = max(pieces, key=lambda p: p["height"])
+    line = [
+        p for p in pieces
+        if p["height"] >= MAIN_LINE_RATIO * tallest["height"]
+        and abs(p["mid_y"] - tallest["mid_y"]) <= tallest["height"] / 2
+    ]
+    line.sort(key=lambda p: p["left"])
+
+    text = "".join(p["text"] for p in line)
+    if len(text) > MAX_PLATE_CHARS:
+        # Joined too much: not a single plate line, so trust the tallest piece
+        return {"text": tallest["text"], "ocr_conf": tallest["conf"]}
+
+    # Confidence of the joined text, weighted by each piece's length
+    conf = sum(p["conf"] * len(p["text"]) for p in line) / len(text)
+    return {"text": text, "ocr_conf": conf}
 
 
 def plate_tilt(crop):

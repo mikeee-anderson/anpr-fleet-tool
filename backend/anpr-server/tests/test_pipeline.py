@@ -2,7 +2,12 @@ import cv2
 import numpy as np
 import pytest
 
-from ocr import PLATE_CHARS, ANPRPipeline, plate_tilt, rotate_level
+from ocr import PLATE_CHARS, ANPRPipeline, pick_plate_text, plate_tilt, rotate_level
+
+
+def box(x, y, w, h):
+    """EasyOCR-style corner list for an axis-aligned text box."""
+    return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
 
 
 def tilted_plate_crop(angle):
@@ -40,7 +45,7 @@ class FakeReader:
         self.crop_shapes.append(crop.shape[:2])
         self.kwargs = kwargs
         conf = self.confidences[min(self.calls, len(self.confidences)) - 1]
-        return [(None, f"PLATE{self.calls}", conf)]
+        return [(box(0, 0, 100, 30), f"PLATE{self.calls}", conf)]
 
 
 def make_pipeline(boxes, max_plates=3, conf_threshold=0.35):
@@ -137,4 +142,44 @@ def test_steep_tilt_tries_three_angles_and_keeps_the_most_confident():
     detections = pipeline.run(canvas)
 
     assert pipeline.reader.calls == 3
-    assert detections[0]["ocr"] == {"text": "PLATE2", "ocr_conf": 0.80}
+    assert detections[0]["ocr"]["text"] == "PLATE2"
+    assert detections[0]["ocr"]["ocr_conf"] == pytest.approx(0.80)
+
+
+def clean(text):
+    return text.replace(" ", "").upper()
+
+
+def test_tall_plate_text_beats_more_confident_surround_text():
+    results = [
+        (box(10, 120, 200, 18), "CITY MOTORS", 0.97),  # dealer surround: small, very confident
+        (box(20, 40, 260, 60), "ABC123", 0.71),  # plate characters: tall
+    ]
+
+    assert pick_plate_text(results, 0.3, clean) == {"text": "ABC123", "ocr_conf": 0.71}
+
+
+def test_split_plate_pieces_are_joined_left_to_right():
+    results = [
+        (box(160, 42, 120, 58), "123", 0.9),
+        (box(20, 40, 125, 60), "ABC", 0.6),
+        (box(30, 120, 200, 15), "PH0800", 0.95),  # surround line below
+    ]
+
+    read = pick_plate_text(results, 0.3, clean)
+
+    assert read["text"] == "ABC123"
+    assert read["ocr_conf"] == pytest.approx(0.75)  # length-weighted mean
+
+
+def test_over_long_join_falls_back_to_tallest_piece():
+    results = [
+        (box(0, 40, 150, 60), "ABCDE", 0.8),
+        (box(160, 41, 150, 58), "12345", 0.9),
+    ]
+
+    assert pick_plate_text(results, 0.3, clean) == {"text": "ABCDE", "ocr_conf": 0.8}
+
+
+def test_low_confidence_pieces_are_ignored():
+    assert pick_plate_text([(box(0, 0, 100, 60), "ABC123", 0.1)], 0.3, clean) is None
