@@ -123,7 +123,29 @@ Add `SHEET_ID=...` to log to a Sheet. The service then runs as its own service a
 - **Honest caveat:** the dataset config pointed validation at the training images, so the reported mAP50 of 0.995 is *training* accuracy, not a held-out score. In spot checks, the detector's confidence was high (~0.9). The weaker step is OCR. I measured it on the 26 source photos, using the photo filenames as ground truth:
   - Plain EasyOCR got an exact match **7 times out of 26**. It confused characters (e.g. `Q` read as `@`) and could not read tilted plates at all.
   - Restricting OCR to the characters A–Z and 0–9, and straightening tilted plates before reading them, raised that to **17 out of 26**. To straighten a plate, the app finds the plate's bright rectangle in the crop, measures its tilt, and rotates the crop level. Steep tilts are read at the estimate and ±5°, and the most confident reading is kept.
+  - OCR then keeps the **tallest line of text** in the crop, so dealer surrounds and slogan lines ("Enter a message") are ignored even when OCR is more confident about them. It also corrects a single `1`/`I` or `0`/`O` look-alike when that makes a standard NZ plate (`ABC123` or `AB1234`). Personalised plates are left alone.
   - In the app, the user confirms each reading before it is logged.
+
+### Leak-free retraining
+
+[`backend/training/train_detector.py`](backend/training/train_detector.py) retrains the detector without test-set leakage:
+
+1. **Splits by original photo.** Every Roboflow copy of a photo stays on one side of every split, and the run stops if a photo group or an identical file appears on both sides.
+2. **Holds out 20% of photos as a test set before anything else,** and saves the split to `split.json`.
+3. **Runs grouped 5-fold cross-validation** on the remaining photos to choose the training configuration.
+4. **Trains with `val=False` and keeps the last epoch,** so no evaluation set picks the weights. Ultralytics' usual `best.pt` would let its validation list leak into the model.
+5. **Scores the result once** on the held-out photos. With `--refit-all`, it then retrains on every photo for deployment.
+
+The first run used 26 photos: 21 for training and cross-validation, 5 held out.
+
+| | Original settings | Rotation/perspective, no flips |
+|---|---|---|
+| CV mean mAP50 | 0.988 | 0.990 |
+| CV mean mAP50-95 | **0.711** | 0.586 |
+
+- **Held-out test** (the original settings, chosen by CV): **mAP50 0.995, mAP50-95 0.65, recall 1.0**. This is the first score from photos the model never trained on.
+- **End to end on the held-out photos,** the retrained detector read 4/5 plates exactly. That is the same as the production model, which had seen those photos, so the retrained weights were **not deployed**.
+- **The detector is limited by data, not settings.** The next gain needs more varied photos (black plates, slogans, surrounds, angles, night), and this script retrains on them in one command.
 
 ---
 
