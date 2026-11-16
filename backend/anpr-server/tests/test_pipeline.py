@@ -2,7 +2,8 @@ import cv2
 import numpy as np
 import pytest
 
-from ocr import PLATE_CHARS, ANPRPipeline, correct_plate_format, pick_plate_text, plate_tilt, rotate_level
+from ocr import (PLATE_ASPECT, PLATE_CHARS, ANPRPipeline, correct_plate_format, flatten_plate,
+                 oblique_plate_corners, pick_plate_text, plate_tilt, rotate_level)
 
 
 def box(x, y, w, h):
@@ -209,3 +210,41 @@ def test_corrected_read_keeps_raw_text():
 
 def test_clean_text_keeps_only_letters_and_digits():
     assert ANPRPipeline._clean_text(" ab-c.1_2'3! ") == "ABC123"
+
+
+def side_view_crop(squash, shrink):
+    """A synthetic white plate seen from the side: narrower, far edge shorter."""
+    h, w = 250, 725
+    canvas = np.full((h + 200, w + 200, 3), 70, np.uint8)
+    nw, d = int(w * squash), int(h * shrink / 2)
+    x0 = 100 + (w - nw) // 2
+    quad = np.int32([[x0, 100], [x0 + nw, 100 + d], [x0 + nw, 100 + h - d], [x0, 100 + h]])
+    cv2.fillConvexPoly(canvas, quad, (235, 235, 235))
+    ys, xs = np.where((canvas > 150).all(axis=2))
+    return canvas[ys.min() - 8:ys.max() + 9, xs.min() - 8:xs.max() + 9]
+
+
+def test_side_view_plate_is_flattened_to_plate_shape():
+    crop = side_view_crop(0.4, 0.3)
+
+    corners = oblique_plate_corners(crop)
+    assert corners is not None
+
+    flat = flatten_plate(crop, corners)
+    assert flat.shape[1] / flat.shape[0] == pytest.approx(PLATE_ASPECT, rel=0.05)
+
+
+def test_front_on_plate_is_not_flattened():
+    assert oblique_plate_corners(side_view_crop(1.0, 0.0)) is None
+
+
+def test_side_view_plate_is_read_flattened_first():
+    crop = side_view_crop(0.4, 0.3)
+    canvas = np.zeros((600, 900, 3), np.uint8)
+    canvas[: crop.shape[0], : crop.shape[1]] = crop
+    pipeline = make_pipeline([FakeBox(0.9, [0, 0, crop.shape[1], crop.shape[0]])])
+
+    pipeline.run(canvas)
+
+    h, w = pipeline.reader.crop_shapes[0]
+    assert w / h == pytest.approx(PLATE_ASPECT, rel=0.05)
