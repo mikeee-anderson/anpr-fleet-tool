@@ -72,9 +72,9 @@ const styles = StyleSheet.create({
     outline: {
         position: "absolute",
         borderWidth: 3,
-        borderColor: "#facc15",
+        borderColor: "#F2EA1E",
         borderRadius: 10,
-        shadowColor: "#facc15",
+        shadowColor: "#F2EA1E",
         shadowOpacity: 0.9,
         shadowRadius: 12,
         shadowOffset: { width: 0, height: 0 },

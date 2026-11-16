@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PlateHighlight } from "@/components/plate-highlight";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { brand } from "@/constants/brand";
 import { BACKEND_URL } from "@/constants/config";
 
 type Photo = { uri: string; width: number; height: number };
@@ -236,7 +237,12 @@ export default function HomeScreen() {
     return (
         <View style={styles.screen}>
             <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-                <Text style={styles.title}>FleetScan</Text>
+                <Image
+                    source={require("@/assets/images/fleetscan-logo.png")}
+                    style={styles.logo}
+                    resizeMode="contain"
+                    accessibilityLabel="FleetScan"
+                />
             </View>
 
             {/* Live camera fills most of the screen; after a scan it shows the captured frame */}
@@ -261,7 +267,7 @@ export default function HomeScreen() {
                             style={styles.permissionBtn}
                             onPress={permission.canAskAgain ? requestPermission : () => Linking.openSettings()}
                         >
-                            <Text style={styles.btnText}>{permission.canAskAgain ? "Allow camera" : "Open Settings"}</Text>
+                            <Text style={styles.primaryText}>{permission.canAskAgain ? "Allow camera" : "Open Settings"}</Text>
                         </Pressable>
                     </View>
                 ) : null}
@@ -274,7 +280,14 @@ export default function HomeScreen() {
 
                 {!photo && permission?.granted && (
                     <View style={styles.guideLayer} pointerEvents="none">
-                        <View style={styles.guideFrame} />
+                        {/* Scan brackets and line, as in the FleetScan logo */}
+                        <View style={styles.guideFrame}>
+                            <View style={[styles.corner, styles.cornerTL]} />
+                            <View style={[styles.corner, styles.cornerTR]} />
+                            <View style={[styles.corner, styles.cornerBL]} />
+                            <View style={[styles.corner, styles.cornerBR]} />
+                            <View style={styles.scanLine} />
+                        </View>
                         <View style={styles.hintPill}>
                             <Text style={styles.hintText}>Fit the plate inside the frame</Text>
                         </View>
@@ -283,7 +296,7 @@ export default function HomeScreen() {
 
                 {loadingDetect && (
                     <View style={styles.readingOverlay}>
-                        <ActivityIndicator size="large" color="#fff" />
+                        <ActivityIndicator size="large" color={brand.lemon} />
                         <Text style={styles.readingText}>Reading plate…</Text>
                     </View>
                 )}
@@ -342,8 +355,8 @@ export default function HomeScreen() {
                             disabled={loadingDetect || !cameraReady || !!photo}
                         >
                             <View style={styles.btnRow}>
-                                <IconSymbol name="camera.fill" size={22} color="#fff" />
-                                <Text style={styles.btnText}>{loadingDetect ? "Reading…" : "Scan Plate"}</Text>
+                                <IconSymbol name="camera.fill" size={22} color={brand.ink} />
+                                <Text style={styles.primaryText}>{loadingDetect ? "Reading…" : "Scan Plate"}</Text>
                             </View>
                         </Pressable>
                     </View>
@@ -364,18 +377,33 @@ function confidenceLabel(ocrConf: number) {
 const fill = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 } as const;
 
 const styles = StyleSheet.create({
-    screen: { flex: 1, backgroundColor: "#0b0b0c" },
-    header: { paddingHorizontal: 18, paddingBottom: 10 },
-    title: { color: "#fff", fontSize: 20, fontWeight: "800", textAlign: "center" },
+    screen: { flex: 1, backgroundColor: brand.ink },
+    header: { paddingHorizontal: 18, paddingBottom: 10, alignItems: "center" },
+    logo: { height: 30, aspectRatio: 751 / 144 },
 
-    viewfinder: { flex: 1, marginHorizontal: 12, borderRadius: 22, overflow: "hidden", backgroundColor: "#1c1c1e" },
+    viewfinder: { flex: 1, marginHorizontal: 12, borderRadius: 22, overflow: "hidden", backgroundColor: brand.navy },
     guideLayer: { ...fill, alignItems: "center", justifyContent: "center" },
     // NZ plates are about 3:1
-    guideFrame: { width: "82%", aspectRatio: 3, borderWidth: 3, borderColor: "rgba(255,255,255,0.9)", borderRadius: 12 },
+    guideFrame: { width: "82%", aspectRatio: 3, justifyContent: "center" },
+    corner: { position: "absolute", width: 34, height: 26, borderColor: brand.glacier },
+    cornerTL: { top: 0, left: 0, borderTopWidth: 5, borderLeftWidth: 5, borderTopLeftRadius: 12 },
+    cornerTR: { top: 0, right: 0, borderTopWidth: 5, borderRightWidth: 5, borderTopRightRadius: 12 },
+    cornerBL: { bottom: 0, left: 0, borderBottomWidth: 5, borderLeftWidth: 5, borderBottomLeftRadius: 12 },
+    cornerBR: { bottom: 0, right: 0, borderBottomWidth: 5, borderRightWidth: 5, borderBottomRightRadius: 12 },
+    scanLine: {
+        height: 3,
+        marginHorizontal: -14, // runs past the brackets, like the logo
+        borderRadius: 2,
+        backgroundColor: brand.lemon,
+        shadowColor: brand.lemon,
+        shadowOpacity: 0.9,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 0 },
+    },
     hintPill: {
         position: "absolute",
         bottom: 20,
-        backgroundColor: "rgba(0,0,0,0.55)",
+        backgroundColor: "rgba(1,15,44,0.7)",
         paddingHorizontal: 14,
         paddingVertical: 8,
         borderRadius: 999,
@@ -383,7 +411,7 @@ const styles = StyleSheet.create({
     hintText: { color: "#fff", fontSize: 14, fontWeight: "600" },
     readingOverlay: {
         ...fill,
-        backgroundColor: "rgba(0,0,0,0.45)",
+        backgroundColor: "rgba(1,15,44,0.55)",
         alignItems: "center",
         justifyContent: "center",
         gap: 12,
@@ -391,14 +419,14 @@ const styles = StyleSheet.create({
     readingText: { color: "#fff", fontSize: 16, fontWeight: "700" },
     permissionBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 14 },
     permissionText: { color: "#fff", fontSize: 16, textAlign: "center" },
-    permissionBtn: { backgroundColor: "#2e7dff", paddingVertical: 12, paddingHorizontal: 22, borderRadius: 12 },
+    permissionBtn: { backgroundColor: brand.glacier, paddingVertical: 12, paddingHorizontal: 22, borderRadius: 12 },
 
     resultCard: { marginHorizontal: 12, marginTop: 12, alignItems: "center", gap: 10 },
     plateSurround: {
         backgroundColor: "#0b0b0b",
         borderRadius: 14,
         borderWidth: 1,
-        borderColor: "#3a3a3c", // keeps the black surround visible on the dark screen
+        borderColor: "rgba(98,167,234,0.35)", // keeps the black surround visible on the navy screen
         padding: 7,
         paddingBottom: 16, // surrounds are deeper below the plate
     },
@@ -413,7 +441,7 @@ const styles = StyleSheet.create({
     plateText: { fontSize: 40, fontWeight: "900", letterSpacing: 6, color: "#111" },
     confidenceRow: { flexDirection: "row", alignItems: "center", gap: 8 },
     dot: { width: 10, height: 10, borderRadius: 5 },
-    confidenceText: { color: "#e5e5e5", fontSize: 14, fontWeight: "600" },
+    confidenceText: { color: "#dbe7f6", fontSize: 14, fontWeight: "600" },
 
     bottomBar: { paddingHorizontal: 12, paddingTop: 12 },
     actionRow: { flexDirection: "row", gap: 10 },
@@ -421,10 +449,11 @@ const styles = StyleSheet.create({
     flex2: { flex: 2 },
     btnRow: { flexDirection: "row", alignItems: "center", gap: 10 },
 
-    iconBtn: { backgroundColor: "#2c2c2e", width: 56, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-    primaryBtn: { backgroundColor: "#2e7dff", paddingVertical: 16, borderRadius: 14, alignItems: "center" },
+    iconBtn: { backgroundColor: brand.navy, width: 56, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+    primaryBtn: { backgroundColor: brand.glacier, paddingVertical: 16, borderRadius: 14, alignItems: "center" },
     confirmBtn: { backgroundColor: "#16a34a", paddingVertical: 16, borderRadius: 14, alignItems: "center" },
-    secondaryBtn: { backgroundColor: "#2c2c2e", paddingVertical: 16, borderRadius: 14, alignItems: "center" },
+    secondaryBtn: { backgroundColor: brand.navy, paddingVertical: 16, borderRadius: 14, alignItems: "center" },
     btnText: { color: "#fff", fontSize: 17, fontWeight: "700" },
+    primaryText: { color: brand.ink, fontSize: 17, fontWeight: "800" }, // ink on glacier reads better than white
     secondaryText: { color: "#fff", fontSize: 17, fontWeight: "700" },
 });
