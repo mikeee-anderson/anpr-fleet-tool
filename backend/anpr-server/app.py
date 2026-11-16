@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 import numpy as np
 import cv2
 import os
+import re
 
 from threading import Thread
 
@@ -43,6 +44,7 @@ def startup_event():
 MIN_YOLO_CONF = 0.35
 MIN_OCR_CONF = 0.45
 DEDUP_SECONDS = 15
+VALID_PLATE = re.compile(r"[A-Z0-9]{1,8}")
 
 # ---------------- Health ----------------
 @app.get("/health")
@@ -142,6 +144,11 @@ async def anpr_log(payload: dict):
     plate_text = payload.get("plate_text")
     if not plate_text:
         return {"status": "error", "message": "plate_text missing"}
+    # Client-supplied text reaches the log/Sheet: allow only what a plate can be
+    plate_text = str(plate_text).upper()
+    if not VALID_PLATE.fullmatch(plate_text):
+        return {"status": "error", "message": "plate_text must be 1-8 letters or digits"}
+    payload = {**payload, "plate_text": plate_text}
 
     # Dedupe
     if recently_logged(plate_text, within_seconds=DEDUP_SECONDS):

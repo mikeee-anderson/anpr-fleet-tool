@@ -33,3 +33,6 @@ backend/runs/detect/train/*_batch*.jpg
 # ---------- Editors / OS ----------
 .DS_Store
 .idea/
+
+# Retraining outputs (weights, metrics, dataset lists with local paths)
+backend/training/runs/
