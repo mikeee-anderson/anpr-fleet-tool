@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "anpr-mobile",
+    "name": "FleetScan",
     "slug": "anpr-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -40,7 +40,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "ANPR Scanner uses the camera to read number plates.",
+          "cameraPermission": "FleetScan uses the camera to read number plates.",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }

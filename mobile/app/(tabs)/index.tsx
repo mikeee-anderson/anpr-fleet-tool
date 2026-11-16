@@ -236,7 +236,7 @@ export default function HomeScreen() {
     return (
         <View style={styles.screen}>
             <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-                <Text style={styles.title}>ANPR Scanner</Text>
+                <Text style={styles.title}>FleetScan</Text>
             </View>
 
             {/* Live camera fills most of the screen; after a scan it shows the captured frame */}

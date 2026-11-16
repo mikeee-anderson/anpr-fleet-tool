@@ -1,4 +1,6 @@
-# ANPR Fleet Tool
+# FleetScan
+
+*ANPR fleet-auditing app (repo: `anpr-fleet-tool`)*
 
 **Snap a photo of a number plate on your phone, and the plate is read and logged to a shared Google Sheet.**
 

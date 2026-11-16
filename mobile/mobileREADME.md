@@ -1,6 +1,6 @@
 # ANPR Mobile
 
-React Native (Expo) mobile app for the ANPR Fleet Tool. Fleet staff use the app to photograph a vehicle's number plate — the image is sent to the backend for detection and OCR, the result is shown on screen, and staff confirm to log it to Google Sheets.
+React Native (Expo) mobile app for FleetScan, the ANPR fleet-auditing tool. Fleet staff use the app to photograph a vehicle's number plate — the image is sent to the backend for detection and OCR, the result is shown on screen, and staff confirm to log it to Google Sheets.
 
 ---
 
