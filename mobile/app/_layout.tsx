@@ -16,7 +16,8 @@ export default function RootLayout() {
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       </Stack>
-      <StatusBar style="auto" />
+      {/* The app is a dark camera screen: light status bar text */}
+      <StatusBar style="light" />
     </ThemeProvider>
   );
 }

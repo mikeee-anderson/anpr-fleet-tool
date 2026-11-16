@@ -31,9 +31,9 @@ flowchart LR
     B -.->|"no SHEET_ID set"| L["Console log"]
 ```
 
-1. The user taps **Scan Plate**, the camera opens, and the photo goes to `POST /anpr/detect`.
+1. The app shows a live camera view with a plate guide. The user lines up the plate and taps **Scan Plate** (or picks a photo from the library), and the photo goes to `POST /anpr/detect`.
 2. YOLOv8 locates plate regions and EasyOCR reads each crop. The candidate with the highest OCR confidence that passes both thresholds (YOLO ≥ 0.35, OCR ≥ 0.45) is returned. If none passes, the response is `needs_rescan`.
-3. The user checks the reading and taps **Confirm & Log**, which calls `POST /anpr/log`.
+3. The plate is highlighted on the frozen photo, with the rest tinted, and the reading is shown with a confidence label. The user checks it and taps **Confirm & Log**, which calls `POST /anpr/log`.
 4. The backend ignores repeat scans of the same plate within 15 s, then appends `[timestamp, plate, yolo_conf, ocr_conf, source]` to today's tab (NZ time).
 
 ---
@@ -154,8 +154,8 @@ The first run used 26 photos: 21 for training and cross-validation, 5 held out.
 
 ## Limitations
 
-- **No held-out evaluation:** the dataset is small (26 vehicles) and has no separate validation or test split.
-- **OCR character confusions:** there is no NZ plate-format check (e.g. `ABC123`) to catch or correct misreads.
+- **Small dataset:** 26 vehicles, so the held-out test set is only 5 photos, and the detector misses unusual plates (black, slogan) it has never seen.
+- **OCR character confusions:** only single `1`/`I` and `0`/`O` slips on standard-format plates are corrected; others (e.g. `B`/`8`) still need the user to rescan.
 - **Deduplication is per instance and in memory:** it resets on restart. It also records a plate *before* the Sheets write, so a failed write that's retried within 15 s is reported as a duplicate.
 - **No authentication on the API:** anyone who knows the URL can call `/anpr/log`. The public demo therefore runs without a Sheet.
 - **Errors use HTTP 200** with a `status` field rather than HTTP status codes.
@@ -163,11 +163,10 @@ The first run used 26 photos: 21 for training and cross-validation, 5 held out.
 
 ## What I'd do next
 
-1. Collect more varied data (weather, angles, night), add a proper train/val/test split, and report real held-out metrics. Also retrain with rotation and perspective augmentation: training had them off (`degrees: 0`), so the detector is least confident on angled plates.
-2. Validate and correct OCR output against NZ plate formats.
-3. Export YOLO to ONNX and use a lighter OCR to shrink the image, cutting memory and cold starts and fitting smaller free tiers.
-4. Add an API key on logging endpoints, proper HTTP status codes, and a real datastore with history and search.
-5. Add CI (GitHub Actions) to run the tests and build the image on every push.
+1. Collect more varied photos (black plates, slogans, angles, weather, night) and rerun the leak-free retraining. Rotation augmentation scored worse in cross-validation on the current data, so it should be re-tested once there is more.
+2. Export YOLO to ONNX and use a lighter OCR to shrink the image, cutting memory and cold starts and fitting smaller free tiers.
+3. Add an API key on logging endpoints, proper HTTP status codes, and a real datastore with history and search.
+4. Add CI (GitHub Actions) to run the tests and build the image on every push.
 
 ---
 
