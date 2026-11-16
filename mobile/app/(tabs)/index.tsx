@@ -292,8 +292,13 @@ export default function HomeScreen() {
             {/* Result: the plate styled like a NZ plate, with a plain-English confidence */}
             {ocr && confidence && (
                 <View style={styles.resultCard}>
-                    <View style={styles.plate}>
-                        <Text style={styles.plateText}>{ocr.text}</Text>
+                    {/* Black plastic surround, white plate, thin black inset border */}
+                    <View style={styles.plateSurround}>
+                        <View style={styles.plate}>
+                            <View style={styles.plateInset}>
+                                <Text style={styles.plateText}>{ocr.text}</Text>
+                            </View>
+                        </View>
                     </View>
                     <View style={styles.confidenceRow}>
                         <View style={[styles.dot, { backgroundColor: confidence.color }]} />
@@ -389,13 +394,21 @@ const styles = StyleSheet.create({
     permissionBtn: { backgroundColor: "#2e7dff", paddingVertical: 12, paddingHorizontal: 22, borderRadius: 12 },
 
     resultCard: { marginHorizontal: 12, marginTop: 12, alignItems: "center", gap: 10 },
-    plate: {
-        backgroundColor: "#fff",
-        borderWidth: 4,
+    plateSurround: {
+        backgroundColor: "#0b0b0b",
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: "#3a3a3c", // keeps the black surround visible on the dark screen
+        padding: 7,
+        paddingBottom: 16, // surrounds are deeper below the plate
+    },
+    plate: { backgroundColor: "#fff", borderRadius: 7, padding: 4 },
+    plateInset: {
+        borderWidth: 2,
         borderColor: "#111",
-        borderRadius: 10,
-        paddingVertical: 6,
-        paddingHorizontal: 22,
+        borderRadius: 5,
+        paddingVertical: 4,
+        paddingHorizontal: 20,
     },
     plateText: { fontSize: 40, fontWeight: "900", letterSpacing: 6, color: "#111" },
     confidenceRow: { flexDirection: "row", alignItems: "center", gap: 8 },
