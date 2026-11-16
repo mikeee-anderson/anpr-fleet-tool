@@ -2,6 +2,7 @@
 from pathlib import Path
 from ultralytics import YOLO
 import easyocr
+import itertools
 import re
 
 import numpy as np
@@ -16,6 +17,9 @@ DESKEW_SPREAD = 5  # degrees either side of the estimate tried for steep tilts
 CONFIDENT_READ = 0.9  # OCR confidence that ends the search over angles early
 MAIN_LINE_RATIO = 0.6  # text this fraction of the tallest text's height counts as plate text
 MAX_PLATE_CHARS = 8  # longest plausible NZ plate reading
+PLATE_ASPECT = 2.9  # width / height of an NZ plate (360 x 125 mm)
+OBLIQUE_EDGE_RATIO = 0.1  # left/right edges differing by this much: seen from the side
+OBLIQUE_ASPECT = 0.8  # narrower than this fraction of PLATE_ASPECT: squashed sideways
 
 # Standard NZ formats: ABC123 (since 2001) and AB1234 (older)
 STANDARD_PLATE = re.compile(r"^(?:[A-Z]{3}[0-9]{3}|[A-Z]{2}[0-9]{4})$")
@@ -87,10 +91,18 @@ class ANPRPipeline:
                 angles = [tilt]
             else:
                 angles = [tilt, tilt - DESKEW_SPREAD, tilt + DESKEW_SPREAD]
+            views = (lambda a=a: rotate_level(crop, a) for a in angles)
+
+            # A plate photographed from the side (tight parking spaces) is
+            # squashed horizontally, which turns a 4 into a 1; rotation can't
+            # undo that, so flatten it first. A straight-on plate skips this.
+            corners = oblique_plate_corners(crop)
+            if corners is not None:
+                views = itertools.chain([lambda: flatten_plate(crop, corners)], views)
 
             best = None
-            for angle in angles:
-                read = self._read(rotate_level(crop, angle))
+            for view in views:
+                read = self._read(view())
                 if read and (best is None or read["ocr_conf"] > best["ocr_conf"]):
                     best = read
                 if best and best["ocr_conf"] >= CONFIDENT_READ:
@@ -192,6 +204,72 @@ def correct_plate_format(text):
     return fixes.pop() if len(fixes) == 1 else text
 
 
+def _plate_contour(crop):
+    """The plate's outline: the largest bright region in the crop, or None."""
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(cv2.GaussianBlur(gray, (5, 5), 0), 0, 255,
+                            cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+    contour = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(contour) < 0.2 * crop.shape[0] * crop.shape[1]:
+        return None
+    return contour
+
+
+def oblique_plate_corners(crop):
+    """
+    The plate's four corners (top-left, top-right, bottom-right, bottom-left)
+    when it is seen from the side, else None.
+
+    From the side, a plate looks like a trapezoid (the near edge is taller)
+    and narrower than a real plate. Strongly rotated plates are left to the
+    rotation path, since corner order is ambiguous for them.
+    """
+    contour = _plate_contour(crop)
+    if contour is None:
+        return None
+    hull = cv2.convexHull(contour)
+    perimeter = cv2.arcLength(hull, True)
+    for eps in (0.02, 0.04, 0.06):
+        quad = cv2.approxPolyDP(hull, eps * perimeter, True)
+        if len(quad) == 4:
+            break
+    else:
+        return None
+
+    pts = quad.reshape(4, 2).astype(np.float32)
+    s, d = pts.sum(axis=1), pts[:, 1] - pts[:, 0]
+    tl, br, tr, bl = pts[np.argmin(s)], pts[np.argmax(s)], pts[np.argmin(d)], pts[np.argmax(d)]
+    if len({tuple(p) for p in (tl, tr, br, bl)}) < 4:
+        return None
+
+    top, bottom = np.linalg.norm(tr - tl), np.linalg.norm(br - bl)
+    left, right = np.linalg.norm(bl - tl), np.linalg.norm(br - tr)
+    width, height = (top + bottom) / 2, (left + right) / 2
+    if height < 1 or width < height:
+        return None  # not a wide, roughly level plate
+    edge_tilt = np.degrees(np.arctan2(tr[1] - tl[1], tr[0] - tl[0]))
+    if abs(edge_tilt) > 30:
+        return None
+
+    trapezoid = abs(left - right) / max(left, right) >= OBLIQUE_EDGE_RATIO
+    squashed = width / height < OBLIQUE_ASPECT * PLATE_ASPECT
+    return np.array([tl, tr, br, bl]) if trapezoid or squashed else None
+
+
+def flatten_plate(crop, corners, margin=0.06):
+    """Warp the plate to a front-on view at the real plate shape, with a white margin."""
+    height = int(max(np.linalg.norm(corners[3] - corners[0]), np.linalg.norm(corners[2] - corners[1])))
+    width = int(height * PLATE_ASPECT)
+    mx, my = int(width * margin), int(height * margin)
+    target = np.float32([[mx, my], [mx + width, my], [mx + width, my + height], [mx, my + height]])
+    matrix = cv2.getPerspectiveTransform(corners.astype(np.float32), target)
+    return cv2.warpPerspective(crop, matrix, (width + 2 * mx, height + 2 * my),
+                               flags=cv2.INTER_LINEAR, borderValue=(255, 255, 255))
+
+
 def plate_tilt(crop):
     """
     Tilt of the plate in a crop, in degrees within [-90, 90), or None.
@@ -200,15 +278,8 @@ def plate_tilt(crop):
     take the largest contour's minimum-area rectangle. Returns None when no
     plate-shaped rectangle is found or the tilt is already small.
     """
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    _, mask = cv2.threshold(cv2.GaussianBlur(gray, (5, 5), 0), 0, 255,
-                            cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None
-
-    contour = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(contour) < 0.2 * crop.shape[0] * crop.shape[1]:
+    contour = _plate_contour(crop)
+    if contour is None:
         return None
 
     rect = cv2.minAreaRect(contour)
