@@ -9,7 +9,7 @@ import re
 from threading import Thread
 
 from ocr import load_pipeline
-from sheets import log_plate, recently_logged, sheets_enabled
+from sheets import log_plate, recently_logged, sheets_enabled, undo_log
 
 from google.auth.exceptions import DefaultCredentialsError, RefreshError
 from googleapiclient.errors import HttpError
@@ -45,6 +45,8 @@ MIN_YOLO_CONF = 0.35
 MIN_OCR_CONF = 0.45
 DEDUP_SECONDS = 15
 VALID_PLATE = re.compile(r"[A-Z0-9]{1,8}")
+# One row of a daily tab, as returned when a plate is logged: "2026-11-17!A5:E5"
+ROW_RANGE = re.compile(r"\d{4}-\d{2}-\d{2}!A(\d+):E\1")
 
 # ---------------- Health ----------------
 @app.get("/health")
@@ -92,6 +94,20 @@ def pick_best(detections: list[dict]):
     candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
     return candidates[0][2], None
 
+TOO_DARK_MEAN = 60  # mean grey level (0-255) below which the photo is too dark to read
+TOO_FAR_WIDTH = 0.12  # a plate box narrower than this share of the photo is too far away
+
+
+def rescan_hint(img, detections) -> str | None:
+    """Why a scan probably failed, so the app can say what to change."""
+    if float(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).mean()) < TOO_DARK_MEAN:
+        return "too_dark"
+    widths = [d["bbox"][2] - d["bbox"][0] for d in detections]
+    if widths and max(widths) < TOO_FAR_WIDTH * img.shape[1]:
+        return "too_far"
+    return None
+
+
 def ensure_pipeline_ready():
     """
     If pipeline isn't ready yet, return a response dict; otherwise None.
@@ -130,7 +146,8 @@ async def anpr_detect(file: UploadFile = File(...)):
     best, reason = pick_best(detections)
 
     if best is None:
-        return {"status": "needs_rescan", "message": reason, "detections": detections}
+        return {"status": "needs_rescan", "message": reason, "detections": detections,
+                "hint": rescan_hint(img, detections)}
 
     return {"status": "ok", "best": best, "detections": detections}
 
@@ -172,6 +189,27 @@ async def anpr_log(payload: dict):
         }
 
     return {"status": "ok", "logged_plate": plate_text, **row_info}
+
+
+@app.post("/anpr/log/undo")
+async def anpr_log_undo(payload: dict):
+    """
+    Undo a log from the app: clears the row the plate was written to, if it
+    still holds that plate. Expects { "plate_text": "...", "range": "<tab>!A5:E5" }.
+    """
+    plate_text = str(payload.get("plate_text", "")).upper()
+    row_range = str(payload.get("range") or "")
+    if not VALID_PLATE.fullmatch(plate_text):
+        return {"status": "error", "message": "plate_text must be 1-8 letters or digits"}
+    if sheets_enabled() and not ROW_RANGE.fullmatch(row_range):
+        return {"status": "error", "message": "range must be one row of a daily tab"}
+    try:
+        undone = undo_log(row_range, plate_text)
+    except (RefreshError, DefaultCredentialsError, HttpError) as e:
+        return {"status": "sheet_error", "message": "Could not reach the Sheet to undo.", "error": str(e)}
+    if not undone:
+        return {"status": "mismatch", "message": "That row no longer holds this plate; nothing was changed."}
+    return {"status": "ok", "undone_plate": plate_text}
 
 
 @app.post("/anpr")

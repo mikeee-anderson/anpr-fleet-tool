@@ -124,7 +124,7 @@ def log_plate(plate_text: str, meta: dict | None = None) -> dict:
     service = _get_service()
     _ensure_sheet_exists(service, tab)
 
-    service.spreadsheets().values().append(
+    result = service.spreadsheets().values().append(
         spreadsheetId=SPREADSHEET_ID,
         range=f"{tab}!A:E",
         valueInputOption="RAW",
@@ -132,4 +132,25 @@ def log_plate(plate_text: str, meta: dict | None = None) -> dict:
         body={"values": [row]},
     ).execute()
 
-    return {"sheet": tab, "timestamp": timestamp}
+    # Where the row landed, e.g. "2026-11-17!A5:E5", so the app can undo it
+    return {"sheet": tab, "timestamp": timestamp, "range": result.get("updates", {}).get("updatedRange")}
+
+
+def undo_log(row_range: str, plate_text: str) -> bool:
+    """
+    Undo a logged plate by clearing its row. The row is only cleared if it
+    still holds that plate: clearing (not deleting) means other rows never
+    shift, so a concurrent log can't be removed by mistake.
+    Returns False when the row holds something else.
+    """
+    _recent.pop(plate_text, None)  # it may be logged again straight away
+    if not sheets_enabled():
+        print(f"[console undo] {row_range}: {plate_text}", flush=True)
+        return True
+
+    values = _get_service().spreadsheets().values()
+    current = values.get(spreadsheetId=SPREADSHEET_ID, range=row_range).execute().get("values", [])
+    if not current or len(current[0]) < 2 or current[0][1] != plate_text:
+        return False
+    values.clear(spreadsheetId=SPREADSHEET_ID, range=row_range, body={}).execute()
+    return True
