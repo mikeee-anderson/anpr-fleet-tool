@@ -4,7 +4,8 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, Tex
 import { Palette, font, radius, space, useColors } from "@/constants/brand";
 
 // Plates are letters and digits only; anything else typed is dropped
-const toPlate = (text: string) => text.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+// NZ plates, personalised ones too, are at most 6 characters
+const toPlate = (text: string) => text.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
 
 type Props = {
     visible: boolean;

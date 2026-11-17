@@ -8,6 +8,7 @@ __pycache__
 .env.*
 service-account*.json
 token.json
+google-token.json
 credentials.json
 client_secret*.json
 tests

@@ -1,15 +1,17 @@
 # anpr-server/app.py
-from fastapi import FastAPI, UploadFile, File, Request
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 import numpy as np
 import cv2
+import hmac
 import os
 import re
 
 from threading import Thread
 
 from ocr import load_pipeline
-from sheets import log_plate, recently_logged, sheets_enabled, undo_log
+import sheets
+from sheets import CELL, FIRST_ROW, NoSheetYet, SheetSetupError, log_plate, sheets_enabled, undo_log
 
 from google.auth.exceptions import DefaultCredentialsError, RefreshError
 from googleapiclient.errors import HttpError
@@ -43,10 +45,32 @@ def startup_event():
 # ---------------- Config ----------------
 MIN_YOLO_CONF = 0.35
 MIN_OCR_CONF = 0.45
-DEDUP_SECONDS = 15
-VALID_PLATE = re.compile(r"[A-Z0-9]{1,8}")
-# One row of a daily tab, as returned when a plate is logged: "2026-11-17!A5:E5"
-ROW_RANGE = re.compile(r"\d{4}-\d{2}-\d{2}!A(\d+):E\1")
+VALID_PLATE = re.compile(r"[A-Z0-9]{1,6}")  # NZ plates, personalised too, are at most 6 characters
+
+# The endpoints that write to the Sheet or Drive need this key (header
+# X-API-Key) when API_KEY is set. /anpr/detect stays open for the demo.
+API_KEY = os.environ.get("API_KEY")
+
+
+def require_key(x_api_key: str | None = Header(default=None)):
+    if API_KEY and not hmac.compare_digest(x_api_key or "", API_KEY):
+        raise HTTPException(status_code=401, detail="Missing or wrong X-API-Key")
+
+
+def sheet_error(e: Exception, plate_text: str | None = None) -> dict:
+    """A Sheets/Drive failure as a reply the app can show."""
+    if isinstance(e, NoSheetYet):
+        out = {"status": "no_sheet", "message": str(e)}
+    elif isinstance(e, SheetSetupError):
+        out = {"status": "sheet_setup_error", "message": str(e)}
+    elif isinstance(e, (RefreshError, DefaultCredentialsError)):
+        out = {"status": "sheet_auth_error", "message": "Google sign-in for the Sheet failed.", "error": str(e)}
+    else:
+        out = {"status": "sheet_http_error", "message": "Google Sheets returned an error.", "error": str(e)}
+    return {**out, "logged_plate": plate_text} if plate_text else out
+
+
+SHEET_ERRORS = (SheetSetupError, RefreshError, DefaultCredentialsError, HttpError)
 
 # ---------------- Health ----------------
 @app.get("/health")
@@ -152,11 +176,11 @@ async def anpr_detect(file: UploadFile = File(...)):
     return {"status": "ok", "best": best, "detections": detections}
 
 
-@app.post("/anpr/log")
+@app.post("/anpr/log", dependencies=[Depends(require_key)])
 async def anpr_log(payload: dict):
     """
-    Debug endpoint: logs a plate text that the client provides.
-    Expects: { "plate_text": "...", "yolo_conf": ..., "ocr_conf": ..., "bbox": [...], ... }
+    Log a plate the app has confirmed: it goes into the next empty REGO cell
+    of today's tab. Expects { "plate_text": "...", ... }.
     """
     plate_text = payload.get("plate_text")
     if not plate_text:
@@ -164,55 +188,59 @@ async def anpr_log(payload: dict):
     # Client-supplied text reaches the log/Sheet: allow only what a plate can be
     plate_text = str(plate_text).upper()
     if not VALID_PLATE.fullmatch(plate_text):
-        return {"status": "error", "message": "plate_text must be 1-8 letters or digits"}
-    payload = {**payload, "plate_text": plate_text}
-
-    # Dedupe
-    if recently_logged(plate_text, within_seconds=DEDUP_SECONDS):
-        return {"status": "duplicate_ignored", "logged_plate": plate_text}
+        return {"status": "error", "message": "plate_text must be 1-6 letters or digits"}
 
     try:
-        row_info = log_plate(plate_text, meta=payload)
-    except (RefreshError, DefaultCredentialsError) as e:
-        return {
-            "status": "sheet_auth_error",
-            "message": "Detected plate but Google Sheets auth failed.",
-            "logged_plate": plate_text,
-            "error": str(e),
-        }
-    except HttpError as e:
-        return {
-            "status": "sheet_http_error",
-            "message": "Google Sheets API returned an error.",
-            "logged_plate": plate_text,
-            "error": str(e),
-        }
+        info = log_plate(plate_text)
+    except SHEET_ERRORS as e:
+        return sheet_error(e, plate_text)
 
-    return {"status": "ok", "logged_plate": plate_text, **row_info}
+    duplicate = info.pop("duplicate")
+    return {"status": "duplicate_ignored" if duplicate else "ok", "logged_plate": plate_text, **info}
 
 
-@app.post("/anpr/log/undo")
+@app.post("/anpr/log/undo", dependencies=[Depends(require_key)])
 async def anpr_log_undo(payload: dict):
     """
-    Undo a log from the app: clears the row the plate was written to, if it
-    still holds that plate. Expects { "plate_text": "...", "range": "<tab>!A5:E5" }.
+    Undo a log from the app: clears the REGO cell the plate was written to, if
+    it still holds that plate. Expects { "plate_text": "...", "range": "'17/11/2026'!A12" }.
     """
     plate_text = str(payload.get("plate_text", "")).upper()
-    row_range = str(payload.get("range") or "")
+    cell = str(payload.get("range") or "")
     if not VALID_PLATE.fullmatch(plate_text):
-        return {"status": "error", "message": "plate_text must be 1-8 letters or digits"}
-    if sheets_enabled() and not ROW_RANGE.fullmatch(row_range):
-        return {"status": "error", "message": "range must be one row of a daily tab"}
+        return {"status": "error", "message": "plate_text must be 1-6 letters or digits"}
+    if sheets_enabled():
+        match = CELL.fullmatch(cell)
+        if not match or int(match.group(2)) < FIRST_ROW:
+            return {"status": "error", "message": "range must be one REGO cell of a daily tab"}
     try:
-        undone = undo_log(row_range, plate_text)
-    except (RefreshError, DefaultCredentialsError, HttpError) as e:
-        return {"status": "sheet_error", "message": "Could not reach the Sheet to undo.", "error": str(e)}
+        undone = undo_log(cell, plate_text)
+    except SHEET_ERRORS as e:
+        return {**sheet_error(e), "status": "sheet_error"}
     if not undone:
-        return {"status": "mismatch", "message": "That row no longer holds this plate; nothing was changed."}
+        return {"status": "mismatch", "message": "That cell no longer holds this plate; nothing was changed."}
     return {"status": "ok", "undone_plate": plate_text}
 
 
-@app.post("/anpr")
+@app.get("/sheets/current", dependencies=[Depends(require_key)])
+def sheets_current():
+    """Where plates are going: the spreadsheet in use, today's tab, and whether a new month can be started."""
+    try:
+        return {"status": "ok", **sheets.status()}
+    except SHEET_ERRORS as e:
+        return sheet_error(e)
+
+
+@app.post("/sheets/new-month", dependencies=[Depends(require_key)])
+def sheets_new_month():
+    """Copy the template into the folder as this month's spreadsheet and switch to it."""
+    try:
+        return {"status": "ok", **sheets.start_new_month()}
+    except SHEET_ERRORS as e:
+        return sheet_error(e)
+
+
+@app.post("/anpr", dependencies=[Depends(require_key)])
 async def anpr_scan_and_log(file: UploadFile = File(...)):
     """
     MAIN MOBILE ENDPOINT:

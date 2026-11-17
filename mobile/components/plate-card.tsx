@@ -62,7 +62,7 @@ export function PlateCard({ text, flagged, selected, onPressChar }: Props) {
                             accessibilityLabel={`Character ${i + 1}, ${c}${flagged.has(i) ? ", check this one" : ""}`}
                             hitSlop={{ top: 8, bottom: 8 }}
                         >
-                            {/* scales with Dynamic Type, capped so 8 characters still fit the plate */}
+                            {/* scales with Dynamic Type, capped so 6 characters (the most a plate has) still fit */}
                             <Text style={styles.char} maxFontSizeMultiplier={1.2}>
                                 {c}
                             </Text>

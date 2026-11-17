@@ -22,6 +22,7 @@ import { Palette, TAP, camera, font, radius, space, useColors } from "@/constant
 import { useScanFeedback } from "@/hooks/use-scan-feedback";
 import { useScanLog } from "@/hooks/use-scan-log";
 import { TodayLog } from "@/components/today-log";
+import { SheetSettings } from "@/components/sheet-settings";
 import { fetchJsonWithRetry } from "@/lib/fetch-json";
 import { BACKEND_URL } from "@/constants/config";
 
@@ -62,6 +63,7 @@ export default function HomeScreen() {
     const [typedPlate, setTypedPlate] = useState<string | null>(null);
     const scanLog = useScanLog();
     const [todayOpen, setTodayOpen] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
     // Short confirmation after logging, with an undo (undo beats a confirm step)
     const [toast, setToast] = useState<{ id: string; text: string; canUndo: boolean } | null>(null);
     const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -215,14 +217,14 @@ export default function HomeScreen() {
         }
     };
 
-    // Same plate already logged today from this phone: ask before logging it again
+    // Same plate already logged today from this phone: each car goes on
+    // today's sheet once, so say so instead of sending it again
     const confirmAndLog = () => {
         const plate = typedPlate ?? correctedPlate ?? bestDetection?.ocr?.text;
         const earlier = plate ? scanLog.loggedToday(plate) : null;
         if (plate && earlier) {
-            Alert.alert(`${plate} already logged at ${earlier} today`, "Log it again?", [
-                { text: "Cancel", style: "cancel" },
-                { text: "Log again", onPress: sendLog },
+            Alert.alert(`${plate} is already logged`, `It went on today's sheet at ${earlier}.`, [
+                { text: "OK", onPress: resetToLive },
             ]);
             return;
         }
@@ -277,7 +279,8 @@ export default function HomeScreen() {
         const text = {
             sent: `${plateText} logged`,
             waiting: `${plateText} saved on this phone. It will send when you have signal.`,
-            duplicate: `${plateText} was already logged moments ago`,
+            duplicate: `${plateText} is already on today's sheet`,
+            no_sheet: `${plateText} saved on this phone. Tap Sheet to start this month's, then it sends.`,
         }[outcome.result];
         showToast(outcome.entry.id, text, outcome.result !== "duplicate");
         resetToLive(); // straight back to scanning the next car
@@ -521,22 +524,38 @@ export default function HomeScreen() {
                     </View>
                 )}
 
-                {/* Today's count and anything still waiting for signal */}
-                {!plateText && !issue && !toast && scanLog.entries.length > 0 && (
-                    <Pressable
-                        style={styles.todayStrip}
-                        onPress={() => setTodayOpen(true)}
-                        accessibilityRole="button"
-                        accessibilityHint="Shows today's logs and lets you undo one"
-                    >
-                        <Text style={styles.todayText}>
-                            {`Today: ${scanLog.loggedCount} logged`}
-                            {scanLog.waitingCount > 0 && (
-                                <Text style={styles.todayWaiting}>{` · ${scanLog.waitingCount} waiting for signal`}</Text>
-                            )}
-                        </Text>
-                        <IconSymbol name="chevron.right" size={16} color={color.textMuted} />
-                    </Pressable>
+                {/* Today's count, anything still waiting, and where scans go */}
+                {!plateText && !issue && !toast && (
+                    <View style={styles.todayStrip}>
+                        {scanLog.entries.length > 0 ? (
+                            <Pressable
+                                style={styles.todayLink}
+                                onPress={() => setTodayOpen(true)}
+                                accessibilityRole="button"
+                                accessibilityHint="Shows today's logs and lets you undo one"
+                            >
+                                <Text style={styles.todayText}>
+                                    {`Today: ${scanLog.loggedCount} logged`}
+                                    {scanLog.waitingCount > 0 && (
+                                        <Text style={styles.todayWaiting}>{` · ${scanLog.waitingCount} waiting`}</Text>
+                                    )}
+                                </Text>
+                                <IconSymbol name="chevron.right" size={16} color={color.textMuted} />
+                            </Pressable>
+                        ) : (
+                            <View style={styles.flex1} />
+                        )}
+                        <Pressable
+                            style={styles.sheetLink}
+                            onPress={() => setSettingsOpen(true)}
+                            accessibilityRole="button"
+                            accessibilityLabel="Audit sheet"
+                            accessibilityHint="Shows which spreadsheet scans go to, and starts a new month"
+                        >
+                            <IconSymbol name="tablecells" size={18} color={color.accent} />
+                            <Text style={styles.sheetLinkText}>Sheet</Text>
+                        </Pressable>
+                    </View>
                 )}
 
                 {/* Actions pinned to the bottom, in thumb reach, above the home indicator */}
@@ -643,6 +662,11 @@ export default function HomeScreen() {
                 entries={scanLog.entries}
                 onUndo={undoFromList}
                 onClose={() => setTodayOpen(false)}
+            />
+            <SheetSettings
+                visible={settingsOpen}
+                onClose={() => setSettingsOpen(false)}
+                onMonthStarted={scanLog.flush}
             />
             <ManualEntry
                 key={manualOpen ? "open" : "closed"} // fresh text each time it opens
@@ -778,12 +802,15 @@ const makeStyles = (color: Palette) =>
         todayStrip: {
             flexDirection: "row",
             alignItems: "center",
-            justifyContent: "space-between",
+            gap: space.md,
             marginHorizontal: space.md,
             marginTop: space.sm,
             minHeight: TAP,
         },
-        todayText: { ...font.body, fontWeight: "600", color: color.textMuted },
+        todayLink: { flex: 1, flexDirection: "row", alignItems: "center", gap: space.xs, minHeight: TAP },
+        sheetLink: { flexDirection: "row", alignItems: "center", gap: space.xs, minHeight: TAP, paddingLeft: space.sm },
+        sheetLinkText: { ...font.label, fontSize: 16, color: color.accent },
+        todayText: { ...font.body, fontWeight: "600", color: color.textMuted, flexShrink: 1 },
         todayWaiting: { color: color.warning },
 
         bottomBar: { paddingHorizontal: space.md, paddingTop: space.md },

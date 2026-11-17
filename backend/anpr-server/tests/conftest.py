@@ -9,8 +9,9 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-# Force console logging before the app (and sheets.py) is imported.
-os.environ.pop("SHEET_ID", None)
+# Force console logging and no API key before the app (and sheets.py) is imported.
+for var in ("SHEET_ID", "SHEETS_FOLDER_ID", "SHEETS_TEMPLATE_ID", "API_KEY"):
+    os.environ.pop(var, None)
 
 import app as app_module  # noqa: E402
 import sheets  # noqa: E402
@@ -48,7 +49,10 @@ def plate_jpeg() -> bytes:
 def client(monkeypatch):
     """TestClient without the startup hook, so the real model never loads."""
     monkeypatch.setattr(sheets, "SPREADSHEET_ID", None)
-    sheets._recent.clear()
+    monkeypatch.setattr(sheets, "FOLDER_ID", None)
+    sheets._console_logged.clear()
+    sheets._clients.clear()
+    sheets.forget_cache()
     return TestClient(app_module.app, raise_server_exceptions=False)
 
 

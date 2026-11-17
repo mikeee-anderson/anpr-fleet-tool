@@ -17,3 +17,14 @@ function devMachineUrl(): string | null {
 export const BACKEND_URL = (
     process.env.EXPO_PUBLIC_API_URL || devMachineUrl() || "http://localhost:8000"
 ).replace(/\/+$/, "");
+
+/**
+ * Key for the endpoints that write to the Sheet (EXPO_PUBLIC_API_KEY, the
+ * server's API_KEY). It ships inside the app, so it keeps out strangers who
+ * find the URL, not someone who unpacks the app.
+ */
+export const API_KEY = process.env.EXPO_PUBLIC_API_KEY ?? "";
+
+export function apiHeaders(extra: Record<string, string> = {}): Record<string, string> {
+    return API_KEY ? { ...extra, "X-API-Key": API_KEY } : extra;
+}

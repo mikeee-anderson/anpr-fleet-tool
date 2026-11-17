@@ -1,6 +1,6 @@
 # ANPR Backend
  
-FastAPI server that receives plate images from the mobile app, runs YOLOv8 to detect the plate region, applies EasyOCR to extract the text, deduplicates, and logs to a Google Sheet tab named by today's date.
+FastAPI server that receives plate images from the mobile app, runs YOLOv8 to detect the plate region, applies EasyOCR to extract the text, and writes confirmed plates into the REGO column of today's tab in the month's audit spreadsheet.
  
 Runs locally with `docker compose up --build` (from the repo root) and deploys to **Google Cloud Run** with `deploy/cloud-run.sh`.
  
@@ -13,7 +13,7 @@ backend/
 ├── anpr-server/
 │   ├── app.py              # FastAPI app — endpoints, pipeline loading, error handling
 │   ├── ocr.py              # ANPRPipeline class (YOLOv8 + EasyOCR)
-│   ├── sheets.py           # Google Sheets (or console) logging, credentials, dedup
+│   ├── sheets.py           # audit spreadsheet (or console): month files, day tabs, REGO column, undo
 │   ├── models/detector/
 │   │   └── best.pt         # Fine-tuned YOLOv8 weights (the only committed weights)
 │   ├── tests/              # pytest suite (synthetic images only)
@@ -45,7 +45,7 @@ uvicorn app:app --reload
 pytest
 ```
  
-Interactive API docs at `http://localhost:8000/docs`. No credentials are needed: without `SHEET_ID`, plates are printed to the console.
+Interactive API docs at `http://localhost:8000/docs`. No credentials are needed: with no spreadsheet configured, plates are printed to the console.
  
 > The model loads in a background thread on startup — check `/health` before sending images. (On Cloud Run it loads before the server accepts traffic instead.)
  
@@ -70,11 +70,13 @@ From all detections, picks the one with the highest OCR confidence (then YOLO co
 - OCR confidence: `>0.45`
  
 ### Logging (`sheets.py`)
-- If `SHEET_ID` is unset, rows are printed to the console instead (no credentials needed)
-- Credentials: `GOOGLE_SERVICE_ACCOUNT_JSON` if set, otherwise Application Default Credentials (a key file via `GOOGLE_APPLICATION_CREDENTIALS`, or the Cloud Run service account)
-- Creates a new Sheet tab named `YYYY-MM-DD` if it doesn't exist for today (NZ timezone)
-- Appends a row: `[timestamp, plate_text, yolo_conf, ocr_conf, source]`
-- Deduplicates: ignores the same plate logged within 15 seconds (in-memory)
+- No `SHEETS_FOLDER_ID` or `SHEET_ID` → plates are printed to the console (no credentials needed)
+- The spreadsheet in use is the newest in `SHEETS_FOLDER_ID` (or the fixed `SHEET_ID`); `POST /sheets/new-month` copies `SHEETS_TEMPLATE_ID` into the folder as "`<prefix>` - Month YYYY"
+- Today's tab is `DD/MM/YYYY` (NZ time), copied from the `TEMPLATE` tab on the first scan of the day and placed first
+- The plate goes into the next empty cell of column A from row 6; nothing else is written. A plate already on today's tab isn't added again. Past the template's last row, the row above (A:D) is copied so the formulas continue
+- Undo clears that one cell, only if it still holds the plate
+- Credentials, in order: `GOOGLE_OAUTH_TOKEN_JSON` (a sign-in from `backend/scripts/google_sign_in.py`), `GOOGLE_SERVICE_ACCOUNT_JSON`, then Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS` may point at a sign-in or a key file)
+- All Sheets calls run under one lock, so two scans can't claim the same cell (the service runs as one instance)
  
 ---
  
@@ -119,7 +121,7 @@ Upload an image, get detection results. Does **not** log to Sheets.
 ```
  
 ### `POST /anpr/log`
-Log a plate text supplied by the client.
+Log a plate the app has confirmed. Needs header `X-API-Key` when the server sets `API_KEY` (as do undo, `/anpr` and `/sheets/*`).
  
 **Request:** `application/json`
 ```json
@@ -137,10 +139,19 @@ Log a plate text supplied by the client.
 {
   "status": "ok",
   "logged_plate": "ABC123",
-  "sheet": "2026-04-08",
-  "timestamp": "2026-04-08 14:32:01"
+  "sheet": "Yard audit - November 2026",
+  "tab": "17/11/2026",
+  "range": "'17/11/2026'!A12"
 }
 ```
+
+`status` is `duplicate_ignored` when the plate is already on today's tab, `no_sheet` when the folder has no spreadsheet yet (the app keeps the scan and sends it once a month is started), and `sheet_setup_error` / `sheet_auth_error` / `sheet_http_error` with a `message` otherwise.
+
+### `POST /anpr/log/undo`
+`{ "plate_text": "ABC123", "range": "'17/11/2026'!A12" }` clears that REGO cell if it still holds the plate (`ok`), otherwise `mismatch`.
+
+### `GET /sheets/current` · `POST /sheets/new-month`
+The spreadsheet in use (`name`, `url`, today's `tab`, `month_title`, `can_start_month`), and starting this month's spreadsheet from the template.
  
 ### `POST /anpr`
 Combined endpoint — detect and log in a single call. Used by the mobile app's quick-scan flow.
@@ -153,12 +164,18 @@ All optional — see `anpr-server/.env.example`.
  
 | Variable | Description |
 |----------|-------------|
-| `SHEET_ID` | Google Sheet to log to. Unset → console logging |
+| `SHEETS_FOLDER_ID` | Drive folder of monthly spreadsheets; the newest is used |
+| `SHEETS_TEMPLATE_ID` | Spreadsheet copied by "start new month" |
+| `SHEET_TITLE_PREFIX` | Monthly file name prefix (default `Yard audit`) |
+| `SHEET_ID` | One fixed spreadsheet instead of a folder |
+| `SHEET_TEMPLATE_TAB` / `SHEET_FIRST_ROW` / `SHEET_BLOCK` | Day-tab layout (defaults `TEMPLATE`, `6`, `A:D`) |
+| `GOOGLE_OAUTH_TOKEN_JSON` | Sign-in to your Google account, as one string |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Full service account JSON as one string |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path to a key file (alternative to the above) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to a sign-in or key file |
+| `API_KEY` | Required `X-API-Key` for logging, undo and `/sheets/*` |
 | `PORT` | Listen port (default 8000; Cloud Run sets 8080) |
  
-On Cloud Run, leave the credential variables empty: the service runs as its own service account, which you share the Sheet with.
+On Cloud Run, `deploy/cloud-run.sh` puts the sign-in and API key in Secret Manager; see the main README's Google Sheets section.
  
 ---
  

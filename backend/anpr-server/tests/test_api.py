@@ -97,7 +97,7 @@ def test_scan_and_log_uses_console_logger_without_credentials(client, plate_jpeg
 
 
 # ---------------- /anpr/log ----------------
-def test_log_ignores_same_plate_within_dedup_window(client):
+def test_log_ignores_a_plate_already_logged_today(client):
     first = client.post("/anpr/log", json={"plate_text": "ABC123"})
     second = client.post("/anpr/log", json={"plate_text": "ABC123"})
 
@@ -144,7 +144,7 @@ def test_real_pipeline_runs_end_to_end_on_synthetic_image(plate_jpeg):
         assert set(d) == {"bbox", "yolo_conf", "ocr"}
 
 
-@pytest.mark.parametrize("bad", ["ABC-123", "<script>", "ABC 123", "ÄBC123", "ABCDEFGHI", "🚗"])
+@pytest.mark.parametrize("bad", ["ABC-123", "<script>", "ABC 123", "ÄBC123", "ABCDEFG", "🚗"])
 def test_log_rejects_non_alphanumeric_plate_text(client, bad):
     res = client.post("/anpr/log", json={"plate_text": bad})
 
@@ -164,55 +164,46 @@ def test_undo_in_console_mode_lets_the_plate_be_logged_again(client):
     res = client.post("/anpr/log/undo", json={"plate_text": "ABC123", "range": None})
 
     assert res.json() == {"status": "ok", "undone_plate": "ABC123"}
-    # the dedup window no longer blocks it
+    # no longer counted as on today's list
     assert client.post("/anpr/log", json={"plate_text": "ABC123"}).json()["status"] == "ok"
 
 
-class FakeValues:
-    def __init__(self, rows):
-        self.rows, self.cleared = rows, None
-
-    def get(self, spreadsheetId, range):
-        return type("Req", (), {"execute": lambda _: {"values": self.rows}})()
-
-    def clear(self, spreadsheetId, range, body):
-        self.cleared = range
-        return type("Req", (), {"execute": lambda _: {}})()
-
-
-@pytest.fixture
-def fake_sheet(monkeypatch):
-    def install(rows):
-        values = FakeValues(rows)
-        service = type("Svc", (), {"spreadsheets": lambda _: type("S", (), {"values": lambda _: values})()})()
-        monkeypatch.setattr(sheets, "SPREADSHEET_ID", "sheet-id")
-        monkeypatch.setattr(sheets, "_get_service", lambda: service)
-        return values
-    return install
-
-
-def test_undo_clears_the_row_when_it_still_holds_the_plate(client, fake_sheet):
-    values = fake_sheet([["2026-11-17 09:12:00", "ABC123", "0.9", "0.9", "mobile_confirm"]])
-
-    res = client.post("/anpr/log/undo", json={"plate_text": "ABC123", "range": "2026-11-17!A5:E5"})
-
-    assert res.json()["status"] == "ok"
-    assert values.cleared == "2026-11-17!A5:E5"
-
-
-def test_undo_leaves_a_row_holding_another_plate(client, fake_sheet):
-    values = fake_sheet([["2026-11-17 09:12:00", "XYZ789", "0.9", "0.9", "mobile_confirm"]])
-
-    res = client.post("/anpr/log/undo", json={"plate_text": "ABC123", "range": "2026-11-17!A5:E5"})
-
-    assert res.json()["status"] == "mismatch"
-    assert values.cleared is None
-
-
-@pytest.mark.parametrize("bad_range", ["Sheet1!A1:Z999", "2026-11-17!A5:E9", "2026-11-17!A:E"])
-def test_undo_rejects_anything_but_one_daily_row(client, fake_sheet, bad_range):
-    fake_sheet([])
+@pytest.mark.parametrize("bad_range", [
+    "Sheet1!A1:Z999",          # not a daily tab
+    "'17/11/2026'!A5:E9",      # more than one cell
+    "'17/11/2026'!B12",        # not the REGO column
+    "'17/11/2026'!A2",         # the title rows above the list
+    "17/11/2026!A12",          # unquoted
+])
+def test_undo_rejects_anything_but_one_rego_cell(client, monkeypatch, bad_range):
+    monkeypatch.setattr(sheets, "SPREADSHEET_ID", "sheet-id")
 
     res = client.post("/anpr/log/undo", json={"plate_text": "ABC123", "range": bad_range})
 
     assert res.json()["status"] == "error"
+
+
+# ---------------- API key ----------------
+@pytest.mark.parametrize("headers", [{}, {"X-API-Key": "wrong"}])
+def test_writing_endpoints_need_the_api_key_when_one_is_set(client, monkeypatch, headers):
+    monkeypatch.setattr(app_module, "API_KEY", "s3cret")
+
+    for path in ("/anpr/log", "/anpr/log/undo", "/sheets/new-month"):
+        assert client.post(path, json={"plate_text": "ABC123"}, headers=headers).status_code == 401
+    assert client.get("/sheets/current", headers=headers).status_code == 401
+
+
+def test_the_right_api_key_is_accepted(client, monkeypatch):
+    monkeypatch.setattr(app_module, "API_KEY", "s3cret")
+
+    res = client.post("/anpr/log", json={"plate_text": "ABC123"}, headers={"X-API-Key": "s3cret"})
+
+    assert res.json()["status"] == "ok"
+
+
+def test_detect_stays_open_for_the_demo(client, plate_jpeg, ready_pipeline, monkeypatch):
+    monkeypatch.setattr(app_module, "API_KEY", "s3cret")
+
+    res = client.post("/anpr/detect", files={"file": ("plate.jpg", plate_jpeg, "image/jpeg")})
+
+    assert res.json()["status"] == "ok"

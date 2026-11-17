@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { File, Paths } from "expo-file-system";
 
-import { BACKEND_URL } from "@/constants/config";
+import { BACKEND_URL, apiHeaders } from "@/constants/config";
 import { fetchJsonWithRetry } from "@/lib/fetch-json";
 
 /**
@@ -23,7 +23,8 @@ export type LogEntry = {
 };
 
 export type LogResult =
-    | { result: "sent" | "waiting" | "duplicate"; entry: LogEntry }
+    // no_sheet: kept on the phone until this month's sheet is started
+    | { result: "sent" | "waiting" | "duplicate" | "no_sheet"; entry: LogEntry }
     | { result: "rejected"; message: string };
 
 const logFile = new File(Paths.document, "fleetscan-log.json");
@@ -33,16 +34,27 @@ const today = () => new Date().toDateString();
 // One attempt to send: "network" means try again later
 async function post(path: string, body: object) {
     try {
-        const { ok, data } = await fetchJsonWithRetry(
+        const { ok, status, data } = await fetchJsonWithRetry(
             `${BACKEND_URL}${path}`,
-            { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+            {
+                method: "POST",
+                headers: apiHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify(body),
+            },
             { retries: 1, backoffMs: 1000, timeoutMs: 10000 }
         );
+        if (status === 401) {
+            return { status: "unauthorized", message: "This app's key isn't accepted by the server (EXPO_PUBLIC_API_KEY)." };
+        }
         return ok ? data : { status: "network" }; // 5xx: server trouble, retry later
     } catch {
         return { status: "network" };
     }
 }
+
+// Worth sending again later rather than giving up on: no signal, or no
+// sheet for this month yet
+const tryLater = (status: string | undefined) => status === "network" || status === "no_sheet";
 
 export function useScanLog() {
     const [entries, setEntries] = useState<LogEntry[]>([]);
@@ -70,7 +82,7 @@ export function useScanLog() {
             for (const entry of [...latest.current].reverse()) {
                 if (entry.status !== "waiting") continue;
                 const data = await post("/anpr/log", entry.payload);
-                if (data?.status === "network") break;
+                if (tryLater(data?.status)) break;
                 if (data?.status === "ok" || data?.status === "duplicate_ignored") {
                     update(entry.id, { status: "sent", range: data.range ?? null });
                 } else {
@@ -121,6 +133,7 @@ export function useScanLog() {
 
         const data = await post("/anpr/log", payload);
         if (data?.status === "network") return { result: "waiting", entry };
+        if (data?.status === "no_sheet") return { result: "no_sheet", entry };
         if (data?.status === "ok" || data?.status === "duplicate_ignored") {
             const sent = { ...entry, status: "sent" as const, range: data.range ?? null };
             update(entry.id, sent);
@@ -158,6 +171,7 @@ export function useScanLog() {
         loggedCount: active.length,
         waitingCount: entries.filter((e) => e.status === "waiting").length,
         log,
+        flush,
         undo,
         loggedToday,
     };

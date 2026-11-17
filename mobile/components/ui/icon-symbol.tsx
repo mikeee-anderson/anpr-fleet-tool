@@ -27,6 +27,7 @@ const MAPPING = {
   'speaker.slash.fill': 'volume-off',
   'keyboard': 'keyboard',
   'exclamationmark.triangle.fill': 'warning',
+  'tablecells': 'table-chart',
 } as IconMapping;
 
 /**

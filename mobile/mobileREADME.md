@@ -1,6 +1,6 @@
 # ANPR Mobile
 
-React Native (Expo) mobile app for FleetScan, the ANPR fleet-auditing tool. Fleet staff use the app to photograph a vehicle's number plate — the image is sent to the backend for detection and OCR, the result is shown on screen, and staff confirm to log it to Google Sheets.
+React Native (Expo) mobile app for FleetScan, the ANPR fleet-auditing tool. Fleet staff use the app to photograph a vehicle's number plate — the image is sent to the backend for detection and OCR, the result is shown on screen, and staff confirm to write it into today's tab of the yard-audit spreadsheet. **Sheet** (bottom right) shows which spreadsheet is in use and starts a new month's.
 
 ---
 
@@ -67,7 +67,7 @@ echo "EXPO_PUBLIC_API_URL=https://your-service.run.app" > .env
 ### Confirm & Log flow
 5. User reviews the detected plate and taps **Confirm & Log**
 6. App sends plate text, confidence scores, bbox, and `source: "mobile_confirm"` to `POST /anpr/log`
-7. Backend logs to Google Sheets and returns confirmation
+7. Backend writes the plate into today's REGO column and returns the cell (for undo)
 8. Success/duplicate/error is shown via an Alert
 
 ### Retry logic
