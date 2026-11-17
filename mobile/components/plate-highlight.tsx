@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Animated, Easing, StyleSheet, View } from "react-native";
+import { camera } from "@/constants/brand";
 
 type Size = { width: number; height: number };
 
@@ -22,6 +23,7 @@ export function coverRect(bbox: number[], photo: Size, frame: Size) {
 
 const PAD = 6; // breathing room around the detected box
 const TINT = "rgba(0,0,0,0.6)";
+const RADIUS = 10; // corner radius of the outline, and of the clear cutout in the tint
 
 /**
  * Apple-card-scanner style result: the photo dims except for the plate,
@@ -49,13 +51,27 @@ export function PlateHighlight({ bbox, photo, frame }: { bbox: number[]; photo: 
 
     const scale = appear.interpolate({ inputRange: [0, 1], outputRange: [1.12, 1] });
 
+    // The tint is one view with a border thick enough to cover the screen. Its
+    // inner edge is the cutout, and a border's inner corner radius is its outer
+    // radius minus its width, so the hole has exactly the outline's rounded
+    // corners (four rectangular panels left the corners untinted).
+    const band = Math.max(frame.width, frame.height);
+
     return (
-        <Animated.View style={[StyleSheet.absoluteFill, { opacity: appear }]} pointerEvents="none">
-            {/* Four tint panels around the plate, leaving it at full brightness */}
-            <View style={[styles.tint, { left: 0, top: 0, right: 0, height: top }]} />
-            <View style={[styles.tint, { left: 0, top: bottom, right: 0, bottom: 0 }]} />
-            <View style={[styles.tint, { left: 0, top, width: left, height: bottom - top }]} />
-            <View style={[styles.tint, { left: right, top, right: 0, height: bottom - top }]} />
+        <Animated.View style={[StyleSheet.absoluteFill, styles.clip, { opacity: appear }]} pointerEvents="none">
+            <View
+                style={[
+                    styles.tint,
+                    {
+                        left: left - band,
+                        top: top - band,
+                        width: right - left + 2 * band,
+                        height: bottom - top + 2 * band,
+                        borderWidth: band,
+                        borderRadius: RADIUS + band,
+                    },
+                ]}
+            />
 
             <Animated.View
                 style={[
@@ -68,13 +84,14 @@ export function PlateHighlight({ bbox, photo, frame }: { bbox: number[]; photo: 
 }
 
 const styles = StyleSheet.create({
-    tint: { position: "absolute", backgroundColor: TINT },
+    clip: { overflow: "hidden" },
+    tint: { position: "absolute", borderColor: TINT },
     outline: {
         position: "absolute",
         borderWidth: 3,
-        borderColor: "#F2EA1E",
-        borderRadius: 10,
-        shadowColor: "#F2EA1E",
+        borderColor: camera.success,
+        borderRadius: RADIUS,
+        shadowColor: camera.success,
         shadowOpacity: 0.9,
         shadowRadius: 12,
         shadowOffset: { width: 0, height: 0 },

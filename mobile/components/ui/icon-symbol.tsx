@@ -21,6 +21,12 @@ const MAPPING = {
   'chevron.right': 'chevron-right',
   'camera.fill': 'photo-camera',
   'photo.on.rectangle': 'photo-library',
+  'flashlight.on.fill': 'flashlight-on',
+  'flashlight.off.fill': 'flashlight-off',
+  'speaker.wave.2.fill': 'volume-up',
+  'speaker.slash.fill': 'volume-off',
+  'keyboard': 'keyboard',
+  'exclamationmark.triangle.fill': 'warning',
 } as IconMapping;
 
 /**
